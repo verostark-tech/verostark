@@ -18,7 +18,9 @@ import (
 
 const maxUploadSize = 50 << 20 // 50 MB
 
-var uploads = objects.NewBucket("verostark-uploads", objects.BucketConfig{})
+// Uploads is the shared object storage bucket for all uploaded files.
+// Other services that need to read uploaded files should reference this directly.
+var Uploads = objects.NewBucket("verostark-uploads", objects.BucketConfig{})
 
 // UploadResult is returned after a successful upload.
 type UploadResult struct {
@@ -73,7 +75,7 @@ func Upload(w http.ResponseWriter, req *http.Request) {
 	fullReader := io.MultiReader(strings.NewReader(string(sniff)), file)
 
 	key := storageKey(data.OrgID, header.Filename)
-	writer := uploads.Upload(req.Context(), key)
+	writer := Uploads.Upload(req.Context(), key)
 
 	size, err := io.Copy(writer, fullReader)
 	if err != nil {
