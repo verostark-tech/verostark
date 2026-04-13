@@ -20,26 +20,33 @@ type AuthData struct {
 	Role  string
 }
 
+//encore:service
+type Service struct{}
+
+// initService sets the Clerk API key once at startup.
+func initService() (*Service, error) {
+	clerk.SetKey(secrets.ClientSecretKey)
+	return &Service{}, nil
+}
+
 // VerifyToken validates the Clerk JWT and enforces that the session
 // has an active organisation. Personal (non-org) sessions are rejected.
 //
 //encore:authhandler
-func VerifyToken(ctx context.Context, token string) (auth.UID, *AuthData, error) {
-	clerk.SetKey(secrets.ClientSecretKey)
-
+func (s *Service) VerifyToken(ctx context.Context, token string) (auth.UID, *AuthData, error) {
 	claims, err := jwt.Verify(ctx, &jwt.VerifyParams{Token: token})
 	if err != nil {
-		return "", nil, errs.B().
-			Code(errs.Unauthenticated).
-			Msg("invalid or expired token").
-			Err()
+		return "", nil, &errs.Error{
+			Code:    errs.Unauthenticated,
+			Message: "invalid or expired token",
+		}
 	}
 
 	if claims.ActiveOrganizationID == "" {
-		return "", nil, errs.B().
-			Code(errs.PermissionDenied).
-			Msg("no active organisation on this session — please select an organisation in the app").
-			Err()
+		return "", nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "no active organisation on this session — please select an organisation in the app",
+		}
 	}
 
 	return auth.UID(claims.Subject), &AuthData{
