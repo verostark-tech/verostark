@@ -1,4 +1,3 @@
 {
-	// This is just an example so it's not linked to the Encore platform.
-	"id": "verostark-36n2",
+	"id": "verostark-36n2"
 }
