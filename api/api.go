@@ -105,3 +105,16 @@ func ListDeviations(ctx context.Context, req *detectionsvc.ListFlagsRequest) (*d
 func GetDeviation(ctx context.Context, id int64) (*detectionsvc.Flag, error) {
 	return detectionsvc.GetFlag(ctx, &detectionsvc.GetFlagRequest{ID: id})
 }
+
+// =============================================================================
+// Unmatched lines
+// =============================================================================
+
+// GetUnmatched returns lines from the latest detection run for a statement that
+// could not be matched to the catalogue or evaluated. These are works the
+// administrator should investigate or register before re-running detection.
+//
+//encore:api auth method=GET path=/api/statements/:id/unmatched
+func GetUnmatched(ctx context.Context, id int64) (*detectionsvc.GetUnmatchedResponse, error) {
+	return detectionsvc.GetUnmatched(ctx, &detectionsvc.GetUnmatchedRequest{StatementID: id})
+}

@@ -2,11 +2,18 @@
 // For each statement line it: matches the work in the catalogue, evaluates the
 // distribution key formula, generates an AI explanation for flagged lines, and
 // stores the results as detection_flags.
+//
+// Two additional checks run after the per-line loop:
+//   - Cross right type check: compares MEC vs PERF observed ratios for the same
+//     work. A large divergence flags a systematic misapplication of the key.
+//   - Unmatched lines report: lines that could not be evaluated (missing ISWC,
+//     unknown right type, no catalogue match) are recorded in detection_unmatched.
 package detection
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -22,6 +29,10 @@ import (
 var db = sqldb.NewDatabase("detection", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
 })
+
+// crossRightTypeDivergenceThreshold is the minimum absolute difference between
+// the observed MEC and PERF ratios (net/gross) that triggers a flag.
+const crossRightTypeDivergenceThreshold = 0.05
 
 // --- Domain types ---
 
@@ -46,6 +57,20 @@ type Flag struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// UnmatchedLine is a statement line that could not be evaluated.
+type UnmatchedLine struct {
+	ID              int64   `json:"id"`
+	StatementLineID int64   `json:"statement_line_id"`
+	ISWC            string  `json:"iswc"`
+	WorkRef         string  `json:"work_ref"`
+	RightType       string  `json:"right_type"`
+	NetAmount       float64 `json:"net_amount"`
+	Period          string  `json:"period"`
+	// Reason is one of: no_iswc | no_catalogue_match | unknown_right_type
+	Reason    string    `json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // --- Request / response types ---
 
 type RunDetectionRequest struct {
@@ -53,8 +78,9 @@ type RunDetectionRequest struct {
 }
 
 type RunDetectionResponse struct {
-	RunID     int64 `json:"run_id"`
-	FlagCount int   `json:"flag_count"`
+	RunID          int64 `json:"run_id"`
+	FlagCount      int   `json:"flag_count"`
+	UnmatchedCount int   `json:"unmatched_count"`
 }
 
 type ListFlagsRequest struct {
@@ -71,11 +97,37 @@ type GetFlagRequest struct {
 	ID int64 `json:"id"`
 }
 
+type GetUnmatchedRequest struct {
+	StatementID int64 `json:"statement_id"`
+}
+
+type GetUnmatchedResponse struct {
+	Lines []UnmatchedLine `json:"lines"`
+}
+
+// rightTypeEntry collects per-line data needed for the cross right type check.
+type rightTypeEntry struct {
+	lineID          int64
+	workID          int64
+	title           string
+	ratio           float64 // net / gross — the observed distribution ratio
+	netAmt          float64
+	grossAmt        float64
+	period          string
+	controlledShare float64
+}
+
+// crossWorkData holds the MEC and PERF entries for a single work.
+type crossWorkData struct {
+	mec  *rightTypeEntry
+	perf *rightTypeEntry
+}
+
 // --- Private API ---
 
 // RunDetection evaluates every line in the given statement, flags deviations,
-// generates AI explanations, and stores results. The statement's status is
-// updated from "pending" → "processing" → "completed".
+// generates AI explanations, runs the cross right type check, and records
+// unmatched lines. Statement status is updated throughout.
 //
 //encore:api private
 func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionResponse, error) {
@@ -107,19 +159,64 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		return nil, err
 	}
 
-	var flagCount int
+	var flagCount, unmatchedCount int
+	crossWorks := map[string]*crossWorkData{}
+
 	for _, line := range linesResp.Lines {
-		if line.ISWC == "" || line.GrossAmount == nil {
+		// --- Unmatched tracking ---
+
+		if line.ISWC == "" {
+			addUnmatched(ctx, orgID, runID, line, "no_iswc")
+			unmatchedCount++
+			continue
+		}
+		if line.GrossAmount == nil {
+			// Expected until the STIM parser is implemented — not reported as unmatched.
 			continue
 		}
 		if line.RightType != "mechanical" && line.RightType != "performance" {
+			addUnmatched(ctx, orgID, runID, line, "unknown_right_type")
+			unmatchedCount++
 			continue
 		}
 
 		match, err := statements.GetWorkForLine(ctx, &statements.GetWorkForLineRequest{ISWC: line.ISWC})
-		if err != nil || match.ControlledShare == 0 {
+		if err != nil {
+			addUnmatched(ctx, orgID, runID, line, "no_catalogue_match")
+			unmatchedCount++
 			continue
 		}
+		if match.ControlledShare == 0 {
+			continue // no controlled writers — not a reportable mismatch
+		}
+
+		// --- Collect for cross right type check ---
+
+		entry := &rightTypeEntry{
+			lineID:          line.ID,
+			workID:          match.WorkID,
+			title:           match.Title,
+			ratio:           line.NetAmount / *line.GrossAmount,
+			netAmt:          line.NetAmount,
+			grossAmt:        *line.GrossAmount,
+			controlledShare: match.ControlledShare,
+			period: func() string {
+				if line.Period != "" {
+					return line.Period
+				}
+				return stmt.Period
+			}(),
+		}
+		if _, ok := crossWorks[line.ISWC]; !ok {
+			crossWorks[line.ISWC] = &crossWorkData{}
+		}
+		if line.RightType == "mechanical" {
+			crossWorks[line.ISWC].mec = entry
+		} else {
+			crossWorks[line.ISWC].perf = entry
+		}
+
+		// --- Individual deviation check ---
 
 		result, err := rules.Evaluate(rules.Input{
 			Gross:                     *line.GrossAmount,
@@ -129,11 +226,6 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		})
 		if err != nil || !result.Flagged {
 			continue
-		}
-
-		period := line.Period
-		if period == "" {
-			period = stmt.Period
 		}
 
 		patternType := "overpayment"
@@ -146,7 +238,7 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			WorkTitle:    match.Title,
 			ISWC:         line.ISWC,
 			RightType:    line.RightType,
-			Period:       period,
+			Period:       entry.period,
 			Severity:     result.Severity,
 			ExpectedSEK:  result.Expected,
 			ReceivedSEK:  result.Received,
@@ -156,9 +248,6 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		if err == nil {
 			explanation = explain.Explanation
 		}
-
-		// Recommendation is always rule-based — available even when the AI call fails.
-		recommendation := rules.Recommend(result.Severity, patternType)
 
 		lineID := line.ID
 		workID := match.WorkID
@@ -170,21 +259,98 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open')`,
 			orgID, runID, lineID, workID, match.Title, line.ISWC,
 			result.Expected, result.Received, result.DeviationAmount, result.DeviationPct,
-			result.Severity, patternType, explanation, recommendation,
+			result.Severity, patternType, explanation,
+			rules.Recommend(result.Severity, patternType),
+		); err == nil {
+			flagCount++
+		}
+	}
+
+	// --- Cross right type check ---
+	//
+	// For any work where both MEC and PERF lines exist, compare their observed
+	// ratios. A significant divergence means STIM applied the key differently
+	// across right types for the same work — a separate class of error from the
+	// per-line deviation check.
+
+	for iswc, w := range crossWorks {
+		if w.mec == nil || w.perf == nil {
+			continue
+		}
+
+		divergence := math.Abs(w.mec.ratio - w.perf.ratio)
+		if divergence < crossRightTypeDivergenceThreshold {
+			continue
+		}
+
+		severity := rules.SeverityHigh
+		if divergence > 0.15 {
+			severity = rules.SeverityCritical
+		}
+
+		// Express the divergence in SEK: how much the MEC amount would change
+		// if it had matched the PERF ratio.
+		deviationSEK := (w.mec.ratio - w.perf.ratio) * w.mec.grossAmt
+		expectedSEK := w.mec.grossAmt * w.mec.controlledShare / 3.0
+
+		explanation := "An explanation could not be generated at this time."
+		explain, err := aisvc.ExplainDeviation(ctx, &aisvc.ExplainRequest{
+			WorkTitle:    w.mec.title,
+			ISWC:         iswc,
+			RightType:    "mechanical vs performance",
+			Period:       w.mec.period,
+			Severity:     severity,
+			ExpectedSEK:  expectedSEK,
+			ReceivedSEK:  w.mec.netAmt,
+			DeviationSEK: deviationSEK,
+			DeviationPct: w.mec.ratio - w.perf.ratio,
+		})
+		if err == nil {
+			explanation = explain.Explanation
+		}
+
+		workID := w.mec.workID
+		if _, err := db.Exec(ctx,
+			`INSERT INTO detection_flags
+			    (org_id, detection_run_id, work_id, work_title, iswc,
+			     expected_amount, received_amount, deviation_amount, deviation_pct,
+			     severity, pattern_type, explanation, recommendation, status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
+			orgID, runID, workID, w.mec.title, iswc,
+			expectedSEK, w.mec.netAmt, deviationSEK, w.mec.ratio-w.perf.ratio,
+			severity, "right_type_divergence", explanation,
+			rules.Recommend(severity, "right_type_divergence"),
 		); err == nil {
 			flagCount++
 		}
 	}
 
 	db.Exec(ctx,
-		`UPDATE detection_runs SET status='completed', flag_count=$1, completed_at=$2 WHERE id=$3`,
-		flagCount, time.Now(), runID,
+		`UPDATE detection_runs
+		 SET status='completed', flag_count=$1, unmatched_count=$2, completed_at=$3
+		 WHERE id=$4`,
+		flagCount, unmatchedCount, time.Now(), runID,
 	)
 	statements.UpdateStatementStatus(ctx, &statements.UpdateStatementStatusRequest{
 		ID: stmt.ID, Status: "completed",
 	})
 
-	return &RunDetectionResponse{RunID: runID, FlagCount: flagCount}, nil
+	return &RunDetectionResponse{
+		RunID:          runID,
+		FlagCount:      flagCount,
+		UnmatchedCount: unmatchedCount,
+	}, nil
+}
+
+// addUnmatched records a line that could not be evaluated.
+func addUnmatched(ctx context.Context, orgID string, runID int64, line statements.StatementLine, reason string) {
+	db.Exec(ctx,
+		`INSERT INTO detection_unmatched
+		    (org_id, detection_run_id, statement_line_id, iswc, work_ref, right_type, net_amount, period, reason)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		orgID, runID, line.ID, line.ISWC, line.WorkRef,
+		line.RightType, line.NetAmount, line.Period, reason,
+	)
 }
 
 // ListFlags returns deviation flags for the org, with optional filters.
@@ -263,4 +429,48 @@ func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 		return nil, &errs.Error{Code: errs.NotFound, Message: "deviation not found"}
 	}
 	return &f, nil
+}
+
+// GetUnmatched returns lines from the latest detection run for the given
+// statement that could not be matched or evaluated, so the administrator
+// knows which works to investigate or register.
+//
+//encore:api private
+func GetUnmatched(ctx context.Context, req *GetUnmatchedRequest) (*GetUnmatchedResponse, error) {
+	data := encoreauth.Data().(*authsvc.AuthData)
+	orgID := data.OrgID
+
+	// Resolve the latest detection run for this statement.
+	var runID int64
+	err := db.QueryRow(ctx,
+		`SELECT id FROM detection_runs
+		 WHERE statement_id=$1 AND org_id=$2
+		 ORDER BY created_at DESC LIMIT 1`,
+		req.StatementID, orgID,
+	).Scan(&runID)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "no detection run found for this statement"}
+	}
+
+	rows, err := db.Query(ctx,
+		`SELECT id, statement_line_id, iswc, work_ref, right_type,
+		        net_amount, period, reason, created_at
+		 FROM detection_unmatched
+		 WHERE detection_run_id=$1 AND org_id=$2
+		 ORDER BY created_at`,
+		runID, orgID,
+	)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "could not load unmatched lines"}
+	}
+	defer rows.Close()
+
+	var out []UnmatchedLine
+	for rows.Next() {
+		var u UnmatchedLine
+		rows.Scan(&u.ID, &u.StatementLineID, &u.ISWC, &u.WorkRef,
+			&u.RightType, &u.NetAmount, &u.Period, &u.Reason, &u.CreatedAt)
+		out = append(out, u)
+	}
+	return &GetUnmatchedResponse{Lines: out}, nil
 }

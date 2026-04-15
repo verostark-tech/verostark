@@ -68,3 +68,43 @@ func TestRecommend_CriticalOverpaymentMentionsContact(t *testing.T) {
 		t.Errorf("CRITICAL overpayment recommendation should mention contacting STIM, got: %s", got)
 	}
 }
+
+func TestRecommend_CrossRightTypeDivergence(t *testing.T) {
+	cases := []struct {
+		severity string
+	}{
+		{SeverityCritical},
+		{SeverityHigh},
+	}
+
+	fallback := "Review this deviation and contact STIM's publisher relations team if you cannot identify the cause."
+
+	for _, tc := range cases {
+		t.Run(tc.severity, func(t *testing.T) {
+			got := Recommend(tc.severity, "right_type_divergence")
+			if got == "" {
+				t.Fatal("recommendation is empty")
+			}
+			if got == fallback {
+				t.Errorf("got fallback for known input {%s, right_type_divergence}", tc.severity)
+			}
+		})
+	}
+}
+
+func TestRecommend_CrossRightTypeCriticalMentionsImmediately(t *testing.T) {
+	got := Recommend(SeverityCritical, "right_type_divergence")
+	lower := strings.ToLower(got)
+	if !strings.Contains(lower, "immediately") && !strings.Contains(lower, "contact stim") {
+		t.Errorf("CRITICAL divergence should indicate urgency, got: %s", got)
+	}
+}
+
+func TestRecommend_UnknownPatternReturnsFallback(t *testing.T) {
+	// A valid severity with an unknown pattern should not panic and should
+	// return a non-empty fallback.
+	got := Recommend(SeverityHigh, "territorial_override")
+	if got == "" {
+		t.Fatal("fallback must not be empty for unknown pattern type")
+	}
+}

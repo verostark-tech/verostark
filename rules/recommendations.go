@@ -28,10 +28,24 @@ var recommendations = map[string]map[string]string{
 	},
 }
 
+// crossRightTypeRecommendations covers the right_type_divergence pattern, keyed
+// by severity. Unlike the per-line recommendations, the pattern is always the
+// same — the direction of the divergence is less important than the fact that
+// two right types for the same work were treated differently.
+var crossRightTypeRecommendations = map[string]string{
+	SeverityCritical: "Contact STIM immediately. The mechanical and performance distributions for this work diverged by more than 15 percentage points in the same period, which strongly suggests an error in the distribution calculation for one right type. Request a written breakdown of both calculations and ask STIM to correct the affected distribution before the next cycle.",
+	SeverityHigh:     "Contact STIM's publisher relations team and ask them to review the mechanical and performance distributions for this work in this period. Both right types should carry the same ratio under the STIM key. Provide the ISWC and the distribution period in your enquiry.",
+}
+
 // Recommend returns a concrete, actionable recommendation for a copyright
 // administrator given the severity and pattern of a detected deviation.
 // Falls back to a generic message for unrecognised inputs.
 func Recommend(severity, patternType string) string {
+	if patternType == "right_type_divergence" {
+		if rec, ok := crossRightTypeRecommendations[severity]; ok {
+			return rec
+		}
+	}
 	if byPattern, ok := recommendations[severity]; ok {
 		if rec, ok := byPattern[patternType]; ok {
 			return rec
