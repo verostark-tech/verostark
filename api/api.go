@@ -50,10 +50,11 @@ func ListWorks(ctx context.Context) (*statements.ListWorksResponse, error) {
 type CreateStatementRequest struct {
 	Filename string `json:"filename"`
 	Period   string `json:"period"`
+	FileKey  string `json:"file_key"`
 }
 
-// CreateStatement registers an uploaded STIM statement file. Call /files/upload
-// first; the returned filename and the billing period are the only required fields.
+// CreateStatement registers an uploaded STIM statement file and parses its lines.
+// Call /files/upload first to obtain the file_key, filename, and store the file.
 //
 //encore:api auth method=POST path=/api/statements
 func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*statements.Statement, error) {
@@ -63,9 +64,13 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*stateme
 	if req.Period == "" {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "period is required (e.g. \"2024-Q1\")"}
 	}
+	if req.FileKey == "" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_key is required — upload the file first via /files/upload"}
+	}
 	return statements.CreateStatement(ctx, &statements.CreateStatementRequest{
 		Filename: req.Filename,
 		Period:   req.Period,
+		FileKey:  req.FileKey,
 	})
 }
 
