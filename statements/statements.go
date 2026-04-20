@@ -415,13 +415,15 @@ func UpdateStatementStatus(ctx context.Context, req *UpdateStatementStatusReques
 //
 // Expected columns (order-independent, matched by header name):
 //
-//	Work ID | Title | Source | Right Type | Gross | ISRC |
+//	Work ID | Title | Source | Right Type | Gross | ISWC |
 //	Controlled by Publisher (%) | Interested Party | Role |
 //	Manuscript Share (%) | Amount before fee | Fee (%) | Fee Amount | Net Amount
 //
 // Right Type values: "M" → mechanical, "P" → performance.
-// The ISRC column is used as the work identifier (stored in the iswc field)
-// since STIM does not include ISWC in this format.
+//
+// STIM issues one row per writer for multi-writer works, each row carrying the
+// same gross. Lines are aggregated per (Work ID, Right Type) so the detection
+// engine receives the total publisher net for the work — not a per-writer slice.
 func parseSTIM(r io.Reader) ([]StatementLine, error) {
 	reader := csv.NewReader(r)
 	reader.TrimLeadingSpace = true
@@ -436,7 +438,7 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 		idx[strings.TrimSpace(h)] = i
 	}
 
-	for _, col := range []string{"Work ID", "Gross", "Right Type", "Net Amount", "ISRC"} {
+	for _, col := range []string{"Work ID", "Gross", "Right Type", "Net Amount", "ISWC"} {
 		if _, ok := idx[col]; !ok {
 			return nil, &errs.Error{
 				Code:    errs.InvalidArgument,
@@ -447,7 +449,10 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 
 	sourceIdx, hasSource := idx["Source"]
 
-	var lines []StatementLine
+	type aggKey struct{ workRef, rightType string }
+	agg := map[aggKey]*StatementLine{}
+	var order []aggKey
+
 	for {
 		row, err := reader.Read()
 		if err == io.EOF {
@@ -476,23 +481,38 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 			rt = strings.ToLower(rt)
 		}
 
+		workRef := strings.TrimSpace(row[idx["Work ID"]])
+		iswc := strings.TrimSpace(row[idx["ISWC"]])
+
 		source := ""
 		if hasSource {
 			source = strings.TrimSpace(row[sourceIdx])
 		}
 
-		lines = append(lines, StatementLine{
-			WorkRef:     strings.TrimSpace(row[idx["Work ID"]]),
-			ISWC:        strings.TrimSpace(row[idx["ISRC"]]),
-			Source:      source,
-			RightType:   rt,
-			NetAmount:   net,
-			GrossAmount: &gross,
-		})
+		key := aggKey{workRef: workRef, rightType: rt}
+		if existing, ok := agg[key]; ok {
+			existing.NetAmount += net
+		} else {
+			grossCopy := gross
+			agg[key] = &StatementLine{
+				WorkRef:     workRef,
+				ISWC:        iswc,
+				Source:      source,
+				RightType:   rt,
+				NetAmount:   net,
+				GrossAmount: &grossCopy,
+			}
+			order = append(order, key)
+		}
 	}
 
-	if len(lines) == 0 {
+	if len(agg) == 0 {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "no statement lines found in the file"}
+	}
+
+	lines := make([]StatementLine, 0, len(agg))
+	for _, k := range order {
+		lines = append(lines, *agg[k])
 	}
 	return lines, nil
 }
