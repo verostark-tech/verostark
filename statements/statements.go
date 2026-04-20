@@ -5,7 +5,11 @@ package statements
 
 import (
 	"context"
+	"encoding/csv"
+	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -84,6 +88,7 @@ type ProcessCWRResponse struct {
 type CreateStatementRequest struct {
 	Filename string `json:"filename"`
 	Period   string `json:"period"`
+	FileKey  string `json:"file_key"`
 }
 
 type ListStatementsResponse struct {
@@ -214,23 +219,47 @@ func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*P
 	return &ProcessCWRResponse{WorksStored: worksStored, WritersStored: writersStored}, nil
 }
 
-// CreateStatement registers a new statement upload record.
+// CreateStatement registers a new statement upload record and parses its lines.
+// FileKey must be the storage key returned by /files/upload.
 //
 //encore:api private
 func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Statement, error) {
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
+	if req.FileKey == "" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_key is required — upload the file first via /files/upload"}
+	}
+
+	r := filessvc.Uploads.Download(ctx, req.FileKey)
+	defer r.Close()
+
+	lines, err := parseSTIM(r)
+	if err != nil {
+		return nil, err
+	}
+
 	var s Statement
-	err := db.QueryRow(ctx,
+	if err := db.QueryRow(ctx,
 		`INSERT INTO statements (org_id, filename, period, pro, status)
 		 VALUES ($1, $2, $3, 'STIM', 'pending')
 		 RETURNING id, org_id, filename, period, pro, status, created_at`,
 		orgID, req.Filename, req.Period,
-	).Scan(&s.ID, &s.OrgID, &s.Filename, &s.Period, &s.PRO, &s.Status, &s.CreatedAt)
-	if err != nil {
+	).Scan(&s.ID, &s.OrgID, &s.Filename, &s.Period, &s.PRO, &s.Status, &s.CreatedAt); err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: "could not register statement"}
 	}
+
+	for _, line := range lines {
+		db.Exec(ctx,
+			`INSERT INTO statement_lines
+			    (org_id, statement_id, work_ref, iswc, source, right_type,
+			     net_amount, gross_amount, currency, period)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'SEK',$9)`,
+			orgID, s.ID, line.WorkRef, line.ISWC, line.Source, line.RightType,
+			line.NetAmount, line.GrossAmount, s.Period,
+		)
+	}
+
 	return &s, nil
 }
 
@@ -377,12 +406,93 @@ func UpdateStatementStatus(ctx context.Context, req *UpdateStatementStatusReques
 	return nil
 }
 
-// parseSTIM is the seam for STIM CSV ingestion.
-// Implement this function once the STIM statement file format is known.
-// It should return one StatementLine per CSV row, with all fields populated.
-func parseSTIM(_ io.Reader) ([]StatementLine, error) {
-	return nil, &errs.Error{
-		Code:    errs.Unimplemented,
-		Message: "STIM CSV parser not yet implemented — waiting for statement file",
+// parseSTIM parses a STIM Sweden CSV royalty statement.
+//
+// SYNTHETIC DATA: This parser was built against the synthetic test fixture
+// synthetic_statement_MEC_2025Q1.csv. Real STIM statements may differ in
+// column names, ordering, encoding, or value formats. Validate against the
+// official STIM file specification before using in production.
+//
+// Expected columns (order-independent, matched by header name):
+//
+//	Work ID | Title | Source | Right Type | Gross | ISRC |
+//	Controlled by Publisher (%) | Interested Party | Role |
+//	Manuscript Share (%) | Amount before fee | Fee (%) | Fee Amount | Net Amount
+//
+// Right Type values: "M" → mechanical, "P" → performance.
+// The ISRC column is used as the work identifier (stored in the iswc field)
+// since STIM does not include ISWC in this format.
+func parseSTIM(r io.Reader) ([]StatementLine, error) {
+	reader := csv.NewReader(r)
+	reader.TrimLeadingSpace = true
+
+	header, err := reader.Read()
+	if err != nil {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "could not read CSV header"}
 	}
+
+	idx := make(map[string]int, len(header))
+	for i, h := range header {
+		idx[strings.TrimSpace(h)] = i
+	}
+
+	for _, col := range []string{"Work ID", "Gross", "Right Type", "Net Amount", "ISRC"} {
+		if _, ok := idx[col]; !ok {
+			return nil, &errs.Error{
+				Code:    errs.InvalidArgument,
+				Message: fmt.Sprintf("missing required column %q — is this a STIM CSV file?", col),
+			}
+		}
+	}
+
+	sourceIdx, hasSource := idx["Source"]
+
+	var lines []StatementLine
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "malformed CSV row"}
+		}
+
+		gross, err := strconv.ParseFloat(strings.TrimSpace(row[idx["Gross"]]), 64)
+		if err != nil {
+			continue
+		}
+		net, err := strconv.ParseFloat(strings.TrimSpace(row[idx["Net Amount"]]), 64)
+		if err != nil {
+			continue
+		}
+
+		rt := strings.ToUpper(strings.TrimSpace(row[idx["Right Type"]]))
+		switch rt {
+		case "M":
+			rt = "mechanical"
+		case "P":
+			rt = "performance"
+		default:
+			rt = strings.ToLower(rt)
+		}
+
+		source := ""
+		if hasSource {
+			source = strings.TrimSpace(row[sourceIdx])
+		}
+
+		lines = append(lines, StatementLine{
+			WorkRef:     strings.TrimSpace(row[idx["Work ID"]]),
+			ISWC:        strings.TrimSpace(row[idx["ISRC"]]),
+			Source:      source,
+			RightType:   rt,
+			NetAmount:   net,
+			GrossAmount: &gross,
+		})
+	}
+
+	if len(lines) == 0 {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "no statement lines found in the file"}
+	}
+	return lines, nil
 }

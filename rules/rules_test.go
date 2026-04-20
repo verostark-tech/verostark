@@ -133,6 +133,63 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
+// TestSyntheticStatement runs the exact values from synthetic_statement_MEC_2025Q1.csv
+// through the rules engine. Three lines must be flagged CRITICAL; two must be clean.
+//
+// ControlledManuscriptShare = Controlled_by_Publisher × Manuscript_Share per CSV row.
+// BM003 has two writers each with 50% manuscript share, so each row uses 0.5.
+func TestSyntheticStatement(t *testing.T) {
+	rows := []struct {
+		name                    string
+		gross, received         float64
+		controlledManuscriptShare float64
+		wantFlag                bool
+		wantSev                 string
+	}{
+		// BM001 Sommarnatt: 1.0×1.0=1.0 — received 15.81, expected ~16.30. ~3% gap = STIM fee. Clean.
+		{"BM001 Sommarnatt", 48.90, 15.81, 1.0, false, ""},
+		// BM002 Langtan: 0.5×1.0=0.5 — received 7.19, expected ~7.41. ~3% gap = STIM fee. Clean.
+		{"BM002 Langtan", 44.47, 7.19, 0.5, false, ""},
+		// BM003 Strand Anna: 1.0×0.5=0.5 — received 18.35, expected ~9.46. +94% overpayment.
+		{"BM003 Vintervag (Strand Anna)", 56.77, 18.35, 0.5, true, SeverityCritical},
+		// BM003 Bjork Sara: same — manuscript split ignored, full work amount paid to each writer.
+		{"BM003 Vintervag (Bjork Sara)", 56.77, 18.35, 0.5, true, SeverityCritical},
+		// BM004 Drommar: 1.0×1.0=1.0 — received 81.50, expected ~28.00. STIM key not applied.
+		{"BM004 Drommar", 84.02, 81.50, 1.0, true, SeverityCritical},
+		// BM005 Frihet: 1.0×1.0=1.0 — received 6.94, expected ~7.16. ~3% gap = STIM fee. Clean.
+		{"BM005 Frihet", 21.47, 6.94, 1.0, false, ""},
+	}
+
+	var flagCount int
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			got, err := Evaluate(Input{
+				Gross:                     r.gross,
+				Received:                  r.received,
+				ControlledManuscriptShare: r.controlledManuscriptShare,
+				RightType:                 "mechanical",
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Flagged != r.wantFlag {
+				t.Errorf("Flagged=%v want %v (expected=%.4f received=%.4f deviation_pct=%.2f%%)",
+					got.Flagged, r.wantFlag, got.Expected, got.Received, got.DeviationPct*100)
+			}
+			if got.Severity != r.wantSev {
+				t.Errorf("Severity=%q want %q", got.Severity, r.wantSev)
+			}
+			if got.Flagged {
+				flagCount++
+			}
+		})
+	}
+
+	if flagCount != 3 {
+		t.Errorf("total flags=%d want 3", flagCount)
+	}
+}
+
 func TestEvaluate_UnknownRightType(t *testing.T) {
 	_, err := Evaluate(Input{
 		Gross:                     1000,
