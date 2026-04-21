@@ -108,7 +108,6 @@ type GetUnmatchedResponse struct {
 // rightTypeEntry collects per-line data needed for the cross right type check.
 type rightTypeEntry struct {
 	lineID          int64
-	workID          int64
 	title           string
 	ratio           float64 // net / gross — the observed distribution ratio
 	netAmt          float64
@@ -163,15 +162,7 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 	crossWorks := map[string]*crossWorkData{}
 
 	for _, line := range linesResp.Lines {
-		// --- Unmatched tracking ---
-
-		if line.ISWC == "" {
-			addUnmatched(ctx, orgID, runID, line, "no_iswc")
-			unmatchedCount++
-			continue
-		}
-		if line.GrossAmount == nil {
-			// Expected until the STIM parser is implemented — not reported as unmatched.
+		if line.GrossAmount == nil || *line.GrossAmount == 0 {
 			continue
 		}
 		if line.RightType != "mechanical" && line.RightType != "performance" {
@@ -179,41 +170,35 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			unmatchedCount++
 			continue
 		}
-
-		match, err := statements.GetWorkForLine(ctx, &statements.GetWorkForLineRequest{ISWC: line.ISWC})
-		if err != nil {
-			addUnmatched(ctx, orgID, runID, line, "no_catalogue_match")
-			unmatchedCount++
-			continue
-		}
-		if match.ControlledShare == 0 {
-			continue // no controlled writers — not a reportable mismatch
+		if line.ControlledShare == 0 {
+			continue // publisher has no controlled share for this work — nothing to evaluate
 		}
 
-		// --- Collect for cross right type check ---
+		period := line.Period
+		if period == "" {
+			period = stmt.Period
+		}
 
-		entry := &rightTypeEntry{
-			lineID:          line.ID,
-			workID:          match.WorkID,
-			title:           match.Title,
-			ratio:           line.NetAmount / *line.GrossAmount,
-			netAmt:          line.NetAmount,
-			grossAmt:        *line.GrossAmount,
-			controlledShare: match.ControlledShare,
-			period: func() string {
-				if line.Period != "" {
-					return line.Period
-				}
-				return stmt.Period
-			}(),
-		}
-		if _, ok := crossWorks[line.ISWC]; !ok {
-			crossWorks[line.ISWC] = &crossWorkData{}
-		}
-		if line.RightType == "mechanical" {
-			crossWorks[line.ISWC].mec = entry
-		} else {
-			crossWorks[line.ISWC].perf = entry
+		// --- Collect for cross right type check (keyed by ISWC when present) ---
+
+		if line.ISWC != "" {
+			entry := &rightTypeEntry{
+				lineID:          line.ID,
+				title:           line.WorkTitle,
+				ratio:           line.NetAmount / *line.GrossAmount,
+				netAmt:          line.NetAmount,
+				grossAmt:        *line.GrossAmount,
+				controlledShare: line.ControlledShare,
+				period:          period,
+			}
+			if _, ok := crossWorks[line.ISWC]; !ok {
+				crossWorks[line.ISWC] = &crossWorkData{}
+			}
+			if line.RightType == "mechanical" {
+				crossWorks[line.ISWC].mec = entry
+			} else {
+				crossWorks[line.ISWC].perf = entry
+			}
 		}
 
 		// --- Individual deviation check ---
@@ -221,7 +206,7 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		result, err := rules.Evaluate(rules.Input{
 			Gross:                     *line.GrossAmount,
 			Received:                  line.NetAmount,
-			ControlledManuscriptShare: match.ControlledShare,
+			ControlledManuscriptShare: line.ControlledShare,
 			RightType:                 line.RightType,
 		})
 		if err != nil || !result.Flagged {
@@ -235,10 +220,10 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 
 		explanation := "An explanation could not be generated at this time."
 		explain, err := aisvc.ExplainDeviation(ctx, &aisvc.ExplainRequest{
-			WorkTitle:    match.Title,
+			WorkTitle:    line.WorkTitle,
 			ISWC:         line.ISWC,
 			RightType:    line.RightType,
-			Period:       entry.period,
+			Period:       period,
 			Severity:     result.Severity,
 			ExpectedSEK:  result.Expected,
 			ReceivedSEK:  result.Received,
@@ -250,14 +235,13 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		}
 
 		lineID := line.ID
-		workID := match.WorkID
 		if _, err := db.Exec(ctx,
 			`INSERT INTO detection_flags
-			    (org_id, detection_run_id, statement_line_id, work_id, work_title, iswc,
+			    (org_id, detection_run_id, statement_line_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
 			     severity, pattern_type, explanation, recommendation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open')`,
-			orgID, runID, lineID, workID, match.Title, line.ISWC,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
+			orgID, runID, lineID, line.WorkTitle, line.ISWC,
 			result.Expected, result.Received, result.DeviationAmount, result.DeviationPct,
 			result.Severity, patternType, explanation,
 			rules.Recommend(result.Severity, patternType),
@@ -309,14 +293,13 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			explanation = explain.Explanation
 		}
 
-		workID := w.mec.workID
 		if _, err := db.Exec(ctx,
 			`INSERT INTO detection_flags
-			    (org_id, detection_run_id, work_id, work_title, iswc,
+			    (org_id, detection_run_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
 			     severity, pattern_type, explanation, recommendation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
-			orgID, runID, workID, w.mec.title, iswc,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open')`,
+			orgID, runID, w.mec.title, iswc,
 			expectedSEK, w.mec.netAmt, deviationSEK, w.mec.ratio-w.perf.ratio,
 			severity, "right_type_divergence", explanation,
 			rules.Recommend(severity, "right_type_divergence"),

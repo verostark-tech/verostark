@@ -40,20 +40,21 @@ type Statement struct {
 }
 
 // StatementLine is one row from a parsed royalty statement.
-// GrossAmount is nullable — populated once the STIM CSV parser is implemented.
 type StatementLine struct {
-	ID          int64    `json:"id"`
-	OrgID       string   `json:"org_id"`
-	StatementID int64    `json:"statement_id"`
-	WorkRef     string   `json:"work_ref"`
-	ISWC        string   `json:"iswc"`
-	Territory   string   `json:"territory"`
-	RightType   string   `json:"right_type"`
-	Source      string   `json:"source"`
-	NetAmount   float64  `json:"net_amount"`
-	GrossAmount *float64 `json:"gross_amount,omitempty"`
-	Currency    string   `json:"currency"`
-	Period      string   `json:"period"`
+	ID              int64    `json:"id"`
+	OrgID           string   `json:"org_id"`
+	StatementID     int64    `json:"statement_id"`
+	WorkRef         string   `json:"work_ref"`
+	WorkTitle       string   `json:"work_title"`
+	ISWC            string   `json:"iswc"`
+	Territory       string   `json:"territory"`
+	RightType       string   `json:"right_type"`
+	Source          string   `json:"source"`
+	NetAmount       float64  `json:"net_amount"`
+	GrossAmount     *float64 `json:"gross_amount,omitempty"`
+	ControlledShare float64  `json:"controlled_share"`
+	Currency        string   `json:"currency"`
+	Period          string   `json:"period"`
 }
 
 // Work is a registered catalogue work (imported from CWR).
@@ -252,11 +253,11 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 	for _, line := range lines {
 		db.Exec(ctx,
 			`INSERT INTO statement_lines
-			    (org_id, statement_id, work_ref, iswc, source, right_type,
-			     net_amount, gross_amount, currency, period)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'SEK',$9)`,
-			orgID, s.ID, line.WorkRef, line.ISWC, line.Source, line.RightType,
-			line.NetAmount, line.GrossAmount, s.Period,
+			    (org_id, statement_id, work_ref, work_title, iswc, source, right_type,
+			     net_amount, gross_amount, controlled_share, currency, period)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'SEK',$11)`,
+			orgID, s.ID, line.WorkRef, line.WorkTitle, line.ISWC, line.Source, line.RightType,
+			line.NetAmount, line.GrossAmount, line.ControlledShare, s.Period,
 		)
 	}
 
@@ -317,8 +318,8 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	orgID := data.OrgID
 
 	rows, err := db.Query(ctx,
-		`SELECT id, org_id, statement_id, work_ref, iswc, territory, right_type, source,
-		        net_amount, gross_amount, currency, period
+		`SELECT id, org_id, statement_id, work_ref, work_title, iswc, territory, right_type, source,
+		        net_amount, gross_amount, controlled_share, currency, period
 		 FROM statement_lines WHERE statement_id=$1 AND org_id=$2`,
 		req.StatementID, orgID,
 	)
@@ -330,8 +331,8 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	var out []StatementLine
 	for rows.Next() {
 		var l StatementLine
-		rows.Scan(&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.ISWC, &l.Territory,
-			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.Currency, &l.Period)
+		rows.Scan(&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.WorkTitle, &l.ISWC, &l.Territory,
+			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.ControlledShare, &l.Currency, &l.Period)
 		out = append(out, l)
 	}
 	return &ListStatementLinesResponse{Lines: out}, nil
@@ -448,6 +449,9 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 	}
 
 	sourceIdx, hasSource := idx["Source"]
+	titleIdx, hasTitle := idx["Title"]
+	controlledPctIdx, hasControlledPct := idx["Controlled by Publisher (%)"]
+	manuscriptShareIdx, hasManuscriptShare := idx["Manuscript Share (%)"]
 
 	type aggKey struct{ workRef, rightType string }
 	agg := map[aggKey]*StatementLine{}
@@ -489,18 +493,36 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 			source = strings.TrimSpace(row[sourceIdx])
 		}
 
+		workTitle := ""
+		if hasTitle {
+			workTitle = strings.TrimSpace(row[titleIdx])
+		}
+
+		// controlled_share for this writer row = (manuscript_share% × controlled_by_publisher%) / 10000
+		var controlledShare float64
+		if hasControlledPct && hasManuscriptShare {
+			cp, e1 := strconv.ParseFloat(strings.TrimSpace(row[controlledPctIdx]), 64)
+			ms, e2 := strconv.ParseFloat(strings.TrimSpace(row[manuscriptShareIdx]), 64)
+			if e1 == nil && e2 == nil {
+				controlledShare = (cp / 100.0) * (ms / 100.0)
+			}
+		}
+
 		key := aggKey{workRef: workRef, rightType: rt}
 		if existing, ok := agg[key]; ok {
 			existing.NetAmount += net
+			existing.ControlledShare += controlledShare
 		} else {
 			grossCopy := gross
 			agg[key] = &StatementLine{
-				WorkRef:     workRef,
-				ISWC:        iswc,
-				Source:      source,
-				RightType:   rt,
-				NetAmount:   net,
-				GrossAmount: &grossCopy,
+				WorkRef:         workRef,
+				WorkTitle:       workTitle,
+				ISWC:            iswc,
+				Source:          source,
+				RightType:       rt,
+				NetAmount:       net,
+				GrossAmount:     &grossCopy,
+				ControlledShare: controlledShare,
 			}
 			order = append(order, key)
 		}
