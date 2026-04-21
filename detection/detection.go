@@ -66,7 +66,7 @@ type UnmatchedLine struct {
 	RightType       string  `json:"right_type"`
 	NetAmount       float64 `json:"net_amount"`
 	Period          string  `json:"period"`
-	// Reason is one of: no_iswc | no_catalogue_match | unknown_right_type
+	// Reason is one of: no_iswc | no_catalogue_match | unknown_right_type | no_controlled_share
 	Reason    string    `json:"reason"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -171,7 +171,11 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			continue
 		}
 		if line.ControlledShare == 0 {
-			continue // publisher has no controlled share for this work — nothing to evaluate
+			// No controlled share recorded — CSV column mismatch or truly uncontrolled work.
+			// Surface as unmatched so the administrator (and developer) can see the gap.
+			addUnmatched(ctx, orgID, runID, line, "no_controlled_share")
+			unmatchedCount++
+			continue
 		}
 
 		period := line.Period

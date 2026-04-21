@@ -434,12 +434,14 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "could not read CSV header"}
 	}
 
+	// Index columns by lowercase trimmed name so column matching is
+	// case-insensitive. Real STIM files vary in capitalisation.
 	idx := make(map[string]int, len(header))
 	for i, h := range header {
-		idx[strings.TrimSpace(h)] = i
+		idx[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
-	for _, col := range []string{"Work ID", "Gross", "Right Type", "Net Amount", "ISWC"} {
+	for _, col := range []string{"work id", "gross", "right type", "net amount", "iswc"} {
 		if _, ok := idx[col]; !ok {
 			return nil, &errs.Error{
 				Code:    errs.InvalidArgument,
@@ -448,10 +450,10 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 		}
 	}
 
-	sourceIdx, hasSource := idx["Source"]
-	titleIdx, hasTitle := idx["Title"]
-	controlledPctIdx, hasControlledPct := idx["Controlled by Publisher (%)"]
-	manuscriptShareIdx, hasManuscriptShare := idx["Manuscript Share (%)"]
+	sourceIdx, hasSource := idx["source"]
+	titleIdx, hasTitle := idx["title"]
+	controlledPctIdx, hasControlledPct := idx["controlled by publisher (%)"]
+	manuscriptShareIdx, hasManuscriptShare := idx["manuscript share (%)"]
 
 	type aggKey struct{ workRef, rightType string }
 	agg := map[aggKey]*StatementLine{}
@@ -466,16 +468,16 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "malformed CSV row"}
 		}
 
-		gross, err := strconv.ParseFloat(strings.TrimSpace(row[idx["Gross"]]), 64)
+		gross, err := strconv.ParseFloat(strings.TrimSpace(row[idx["gross"]]), 64)
 		if err != nil {
 			continue
 		}
-		net, err := strconv.ParseFloat(strings.TrimSpace(row[idx["Net Amount"]]), 64)
+		net, err := strconv.ParseFloat(strings.TrimSpace(row[idx["net amount"]]), 64)
 		if err != nil {
 			continue
 		}
 
-		rt := strings.ToUpper(strings.TrimSpace(row[idx["Right Type"]]))
+		rt := strings.ToUpper(strings.TrimSpace(row[idx["right type"]]))
 		switch rt {
 		case "M":
 			rt = "mechanical"
@@ -485,8 +487,8 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 			rt = strings.ToLower(rt)
 		}
 
-		workRef := strings.TrimSpace(row[idx["Work ID"]])
-		iswc := strings.TrimSpace(row[idx["ISWC"]])
+		workRef := strings.TrimSpace(row[idx["work id"]])
+		iswc := strings.TrimSpace(row[idx["iswc"]])
 
 		source := ""
 		if hasSource {
