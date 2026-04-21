@@ -13,6 +13,7 @@ import (
 var allowedExts = map[string]bool{
 	".txt":  true,
 	".csv":  true,
+	".cwr":  true,
 	".pdf":  true,
 	".xlsx": true,
 }
@@ -20,9 +21,11 @@ var allowedExts = map[string]bool{
 // expectedMIMEPrefix maps each allowed extension to the MIME prefix
 // that http.DetectContentType must return for the file to pass.
 // xlsx is a ZIP-based format, so its detected MIME is application/zip.
+// cwr files are plain ASCII text.
 var expectedMIMEPrefix = map[string]string{
 	".txt":  "text/plain",
 	".csv":  "text/plain",
+	".cwr":  "text/plain",
 	".pdf":  "application/pdf",
 	".xlsx": "application/zip",
 }
@@ -36,7 +39,7 @@ func validate(filename string, header []byte) (string, error) {
 	if !allowedExts[ext] {
 		return "", &errs.Error{
 			Code:    errs.InvalidArgument,
-			Message: fmt.Sprintf("file type %q is not supported — accepted formats: .txt, .csv, .pdf, .xlsx", ext),
+			Message: fmt.Sprintf("file type %q is not supported — accepted formats: .txt, .csv, .cwr, .pdf, .xlsx", ext),
 		}
 	}
 
