@@ -498,13 +498,14 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 			workTitle = strings.TrimSpace(row[titleIdx])
 		}
 
-		// controlled_share for this writer row = (manuscript_share% × controlled_by_publisher%) / 10000
+		// controlled_share for this writer row = controlled_by_publisher × manuscript_share.
+		// Both columns carry decimal values in the 0–1 range (1.0 = 100%, 0.5 = 50%).
 		var controlledShare float64
 		if hasControlledPct && hasManuscriptShare {
 			cp, e1 := strconv.ParseFloat(strings.TrimSpace(row[controlledPctIdx]), 64)
 			ms, e2 := strconv.ParseFloat(strings.TrimSpace(row[manuscriptShareIdx]), 64)
 			if e1 == nil && e2 == nil {
-				controlledShare = (cp / 100.0) * (ms / 100.0)
+				controlledShare = cp * ms
 			}
 		}
 

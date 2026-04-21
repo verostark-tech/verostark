@@ -1,8 +1,11 @@
 package statements
 
 import (
+	"math"
 	"strings"
 	"testing"
+
+	"encore.app/rules"
 )
 
 // syntheticCSV is a copy of synthetic_statement_MEC_2025Q1.csv.
@@ -81,6 +84,41 @@ func TestParseSTIM_WorkRefs(t *testing.T) {
 	}
 }
 
+func TestParseSTIM_WorkTitles(t *testing.T) {
+	lines, err := parseSTIM(strings.NewReader(syntheticCSV))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wants := []string{"Sommarnatt", "Langtan", "Vintervag", "Drommar", "Frihet"}
+	for i, l := range lines {
+		if l.WorkTitle != wants[i] {
+			t.Errorf("line %d: WorkTitle=%q want %q", i, l.WorkTitle, wants[i])
+		}
+	}
+}
+
+func TestParseSTIM_ControlledShares(t *testing.T) {
+	// Values in the CSV are 0-1 decimals (1.0 = 100%, 0.5 = 50%).
+	// controlled_share = controlled_by_publisher × manuscript_share.
+	//
+	// BM001: 1.0 × 1.0 = 1.0 (sole author, fully controlled)
+	// BM002: 0.5 × 1.0 = 0.5 (sole author, 50% controlled)
+	// BM003: (1.0 × 0.5) + (1.0 × 0.5) = 1.0 (two authors, each 50%, both controlled)
+	// BM004: 1.0 × 1.0 = 1.0 (sole author, fully controlled)
+	// BM005: 1.0 × 1.0 = 1.0 (sole author, fully controlled)
+	lines, err := parseSTIM(strings.NewReader(syntheticCSV))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wants := []float64{1.0, 0.5, 1.0, 1.0, 1.0}
+	for i, l := range lines {
+		if math.Abs(l.ControlledShare-wants[i]) > 1e-9 {
+			t.Errorf("line %d (%s): ControlledShare=%.6f want %.6f",
+				i, l.WorkRef, l.ControlledShare, wants[i])
+		}
+	}
+}
+
 func TestParseSTIM_EmptyInput(t *testing.T) {
 	_, err := parseSTIM(strings.NewReader(""))
 	if err == nil {
@@ -97,7 +135,7 @@ func TestParseSTIM_MissingRequiredColumn(t *testing.T) {
 }
 
 // TestParseSTIM_AggregatesMultiWriterWork verifies that two CSV rows for the same
-// work (BM003) are collapsed into one line with net amounts summed.
+// work (BM003) are collapsed into one line with net amounts and controlled shares summed.
 func TestParseSTIM_AggregatesMultiWriterWork(t *testing.T) {
 	lines, err := parseSTIM(strings.NewReader(syntheticCSV))
 	if err != nil {
@@ -115,8 +153,69 @@ func TestParseSTIM_AggregatesMultiWriterWork(t *testing.T) {
 	if bm003 == nil {
 		t.Fatal("BM003 not found in parsed lines")
 	}
-	const wantNet = 36.70
-	if bm003.NetAmount != wantNet {
-		t.Errorf("BM003 NetAmount=%.2f want %.2f", bm003.NetAmount, wantNet)
+	if bm003.NetAmount != 36.70 {
+		t.Errorf("BM003 NetAmount=%.2f want 36.70", bm003.NetAmount)
+	}
+	if math.Abs(bm003.ControlledShare-1.0) > 1e-9 {
+		t.Errorf("BM003 ControlledShare=%.6f want 1.0 (0.5+0.5 across two writers)",
+			bm003.ControlledShare)
+	}
+}
+
+// TestDetectionPipeline_SyntheticCSV is the end-to-end detection pipeline test.
+// It feeds the synthetic CSV through parseSTIM and rules.Evaluate to verify
+// exactly which works are flagged and why — without a running server or database.
+//
+// Expected results from first-principles calculation:
+//   - BM001: expected=16.30 received=15.81 dev=-3.0%  → not flagged (below 25%)
+//   - BM002: expected= 7.41 received= 7.19 dev=-3.0%  → not flagged
+//   - BM003: expected=18.92 received=36.70 dev=+94.0% → CRITICAL overpayment
+//   - BM004: expected=28.01 received=81.50 dev=+191%  → CRITICAL overpayment
+//   - BM005: expected= 7.16 received= 6.94 dev=-3.1%  → not flagged
+func TestDetectionPipeline_SyntheticCSV(t *testing.T) {
+	lines, err := parseSTIM(strings.NewReader(syntheticCSV))
+	if err != nil {
+		t.Fatalf("parseSTIM: %v", err)
+	}
+
+	type wantFlag struct {
+		workRef     string
+		patternType string
+		severity    string
+	}
+
+	var got []wantFlag
+	for _, l := range lines {
+		if l.GrossAmount == nil || *l.GrossAmount == 0 || l.ControlledShare == 0 {
+			continue
+		}
+		result, err := rules.Evaluate(rules.Input{
+			Gross:                     *l.GrossAmount,
+			Received:                  l.NetAmount,
+			ControlledManuscriptShare: l.ControlledShare,
+			RightType:                 l.RightType,
+		})
+		if err != nil || !result.Flagged {
+			continue
+		}
+		pt := "overpayment"
+		if result.DeviationAmount < 0 {
+			pt = "underpayment"
+		}
+		got = append(got, wantFlag{l.WorkRef, pt, result.Severity})
+	}
+
+	want := []wantFlag{
+		{"BM003", "overpayment", rules.SeverityCritical},
+		{"BM004", "overpayment", rules.SeverityCritical},
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d flags, want %d\nflags: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("flag[%d]: got %+v, want %+v", i, got[i], w)
+		}
 	}
 }
