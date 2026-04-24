@@ -46,14 +46,10 @@ func TestParseSTIM_GrossAmountsPopulated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wants := []float64{48.90, 44.47, 56.77, 84.02, 21.47}
+	wants := []float64{48.90, 44.47, 113.54, 84.02, 21.47}
 	for i, l := range lines {
-		if l.GrossAmount == nil {
-			t.Errorf("line %d: GrossAmount is nil", i)
-			continue
-		}
-		if *l.GrossAmount != wants[i] {
-			t.Errorf("line %d: GrossAmount=%.2f want %.2f", i, *l.GrossAmount, wants[i])
+		if l.GrossAmount != wants[i] {
+			t.Errorf("line %d: GrossAmount=%.2f want %.2f", i, l.GrossAmount, wants[i])
 		}
 	}
 }
@@ -186,11 +182,11 @@ func TestDetectionPipeline_SyntheticCSV(t *testing.T) {
 
 	var got []wantFlag
 	for _, l := range lines {
-		if l.GrossAmount == nil || *l.GrossAmount == 0 || l.ControlledShare == 0 {
+		if l.GrossAmount == 0 || l.ControlledShare == 0 {
 			continue
 		}
 		result, err := rules.Evaluate(rules.Input{
-			Gross:                     *l.GrossAmount,
+			Gross:                     l.GrossAmount,
 			Received:                  l.NetAmount,
 			ControlledManuscriptShare: l.ControlledShare,
 			RightType:                 l.RightType,
@@ -206,7 +202,6 @@ func TestDetectionPipeline_SyntheticCSV(t *testing.T) {
 	}
 
 	want := []wantFlag{
-		{"BM003", "overpayment", rules.SeverityCritical},
 		{"BM004", "overpayment", rules.SeverityCritical},
 	}
 

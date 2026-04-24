@@ -50,9 +50,9 @@ type StatementLine struct {
 	Territory       string   `json:"territory"`
 	RightType       string   `json:"right_type"`
 	Source          string   `json:"source"`
-	NetAmount       float64  `json:"net_amount"`
-	GrossAmount     *float64 `json:"gross_amount,omitempty"`
-	ControlledShare float64  `json:"controlled_share"`
+	NetAmount       float64 `json:"net_amount"`
+	GrossAmount     float64 `json:"gross_amount"`
+	ControlledShare float64 `json:"controlled_share"`
 	Currency        string   `json:"currency"`
 	Period          string   `json:"period"`
 }
@@ -318,7 +318,7 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	orgID := data.OrgID
 
 	rows, err := db.Query(ctx,
-		`SELECT id, org_id, statement_id, work_ref, work_title, iswc, territory, right_type, source,
+		`SELECT id, org_id, statement_id, work_ref, work_title, iswc, right_type, source,
 		        net_amount, gross_amount, controlled_share, currency, period
 		 FROM statement_lines WHERE statement_id=$1 AND org_id=$2`,
 		req.StatementID, orgID,
@@ -331,8 +331,10 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	var out []StatementLine
 	for rows.Next() {
 		var l StatementLine
-		rows.Scan(&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.WorkTitle, &l.ISWC, &l.Territory,
-			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.ControlledShare, &l.Currency, &l.Period)
+		if err := rows.Scan(&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.WorkTitle, &l.ISWC,
+			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.ControlledShare, &l.Currency, &l.Period); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: "could not read statement line"}
+		}
 		out = append(out, l)
 	}
 	return &ListStatementLinesResponse{Lines: out}, nil
@@ -513,10 +515,10 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 
 		key := aggKey{workRef: workRef, rightType: rt}
 		if existing, ok := agg[key]; ok {
+			existing.GrossAmount += gross
 			existing.NetAmount += net
 			existing.ControlledShare += controlledShare
 		} else {
-			grossCopy := gross
 			agg[key] = &StatementLine{
 				WorkRef:         workRef,
 				WorkTitle:       workTitle,
@@ -524,7 +526,7 @@ func parseSTIM(r io.Reader) ([]StatementLine, error) {
 				Source:          source,
 				RightType:       rt,
 				NetAmount:       net,
-				GrossAmount:     &grossCopy,
+				GrossAmount:     gross,
 				ControlledShare: controlledShare,
 			}
 			order = append(order, key)

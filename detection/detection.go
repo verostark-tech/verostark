@@ -1,13 +1,14 @@
 // Package detection orchestrates deviation analysis for a royalty statement.
-// For each statement line it: matches the work in the catalogue, evaluates the
-// distribution key formula, generates an AI explanation for flagged lines, and
-// stores the results as detection_flags.
+// For each statement line it evaluates the distribution key formula using the
+// controlled share already present on the line, generates an AI explanation for
+// flagged lines, and stores the results as detection_flags. No catalogue lookup
+// is required — all inputs come from the statement itself.
 //
 // Two additional checks run after the per-line loop:
 //   - Cross right type check: compares MEC vs PERF observed ratios for the same
 //     work. A large divergence flags a systematic misapplication of the key.
-//   - Unmatched lines report: lines that could not be evaluated (missing ISWC,
-//     unknown right type, no catalogue match) are recorded in detection_unmatched.
+//   - Unmatched lines report: lines that could not be evaluated (unknown right
+//     type, zero controlled share) are recorded in detection_unmatched.
 package detection
 
 import (
@@ -52,7 +53,6 @@ type Flag struct {
 	Severity        string    `json:"severity"`
 	PatternType     string    `json:"pattern_type"`
 	Explanation     string    `json:"explanation"`
-	Recommendation  string    `json:"recommendation"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 }
@@ -66,7 +66,7 @@ type UnmatchedLine struct {
 	RightType       string  `json:"right_type"`
 	NetAmount       float64 `json:"net_amount"`
 	Period          string  `json:"period"`
-	// Reason is one of: no_iswc | no_catalogue_match | unknown_right_type | no_controlled_share
+	// Reason is one of: unknown_right_type | no_controlled_share
 	Reason    string    `json:"reason"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -158,11 +158,20 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		return nil, err
 	}
 
+	// Delete flags from any previous runs for this statement so re-runs replace, not accumulate.
+	db.Exec(ctx,
+		`DELETE FROM detection_flags
+		 WHERE detection_run_id IN (
+		     SELECT id FROM detection_runs WHERE statement_id=$1 AND org_id=$2 AND id != $3
+		 )`,
+		stmt.ID, orgID, runID,
+	)
+
 	var flagCount, unmatchedCount int
 	crossWorks := map[string]*crossWorkData{}
 
 	for _, line := range linesResp.Lines {
-		if line.GrossAmount == nil || *line.GrossAmount == 0 {
+		if line.GrossAmount == 0 {
 			continue
 		}
 		if line.RightType != "mechanical" && line.RightType != "performance" {
@@ -171,8 +180,6 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			continue
 		}
 		if line.ControlledShare == 0 {
-			// No controlled share recorded — CSV column mismatch or truly uncontrolled work.
-			// Surface as unmatched so the administrator (and developer) can see the gap.
 			addUnmatched(ctx, orgID, runID, line, "no_controlled_share")
 			unmatchedCount++
 			continue
@@ -189,9 +196,9 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			entry := &rightTypeEntry{
 				lineID:          line.ID,
 				title:           line.WorkTitle,
-				ratio:           line.NetAmount / *line.GrossAmount,
+				ratio:           line.NetAmount / line.GrossAmount,
 				netAmt:          line.NetAmount,
-				grossAmt:        *line.GrossAmount,
+				grossAmt:        line.GrossAmount,
 				controlledShare: line.ControlledShare,
 				period:          period,
 			}
@@ -208,7 +215,7 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		// --- Individual deviation check ---
 
 		result, err := rules.Evaluate(rules.Input{
-			Gross:                     *line.GrossAmount,
+			Gross:                     line.GrossAmount,
 			Received:                  line.NetAmount,
 			ControlledManuscriptShare: line.ControlledShare,
 			RightType:                 line.RightType,
@@ -224,34 +231,36 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 
 		explanation := "An explanation could not be generated at this time."
 		explain, err := aisvc.ExplainDeviation(ctx, &aisvc.ExplainRequest{
-			WorkTitle:    line.WorkTitle,
-			ISWC:         line.ISWC,
-			RightType:    line.RightType,
-			Period:       period,
-			Severity:     result.Severity,
-			ExpectedSEK:  result.Expected,
-			ReceivedSEK:  result.Received,
-			DeviationSEK: result.DeviationAmount,
-			DeviationPct: result.DeviationPct,
+			WorkTitle:       line.WorkTitle,
+			ISWC:            line.ISWC,
+			RightType:       line.RightType,
+			Period:          period,
+			Severity:        result.Severity,
+			GrossSEK:        line.GrossAmount,
+			ControlledShare: line.ControlledShare,
+			ExpectedSEK:     result.Expected,
+			ReceivedSEK:     result.Received,
+			DeviationSEK:    result.DeviationAmount,
+			DeviationPct:    result.DeviationPct,
 		})
 		if err == nil {
 			explanation = explain.Explanation
 		}
 
 		lineID := line.ID
-		if _, err := db.Exec(ctx,
+		if _, insertErr := db.Exec(ctx,
 			`INSERT INTO detection_flags
 			    (org_id, detection_run_id, statement_line_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
-			     severity, pattern_type, explanation, recommendation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
+			     severity, pattern_type, explanation, status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open')`,
 			orgID, runID, lineID, line.WorkTitle, line.ISWC,
 			result.Expected, result.Received, result.DeviationAmount, result.DeviationPct,
 			result.Severity, patternType, explanation,
-			rules.Recommend(result.Severity, patternType),
-		); err == nil {
-			flagCount++
+		); insertErr != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: "could not save detection flag"}
 		}
+		flagCount++
 	}
 
 	// --- Cross right type check ---
@@ -297,19 +306,19 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			explanation = explain.Explanation
 		}
 
-		if _, err := db.Exec(ctx,
+		if _, crossErr := db.Exec(ctx,
 			`INSERT INTO detection_flags
 			    (org_id, detection_run_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
-			     severity, pattern_type, explanation, recommendation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open')`,
+			     severity, pattern_type, explanation, status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open')`,
 			orgID, runID, w.mec.title, iswc,
 			expectedSEK, w.mec.netAmt, deviationSEK, w.mec.ratio-w.perf.ratio,
 			severity, "right_type_divergence", explanation,
-			rules.Recommend(severity, "right_type_divergence"),
-		); err == nil {
-			flagCount++
+		); crossErr != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: "could not save cross right type flag"}
 		}
+		flagCount++
 	}
 
 	db.Exec(ctx,
@@ -347,12 +356,17 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
+	// Always scope to the latest detection run per statement so re-runs replace
+	// what the administrator sees rather than accumulating historical duplicates.
 	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id, f.work_id,
 	                 f.work_title, f.iswc, f.expected_amount, f.received_amount,
 	                 f.deviation_amount, f.deviation_pct, f.severity, f.pattern_type,
-	                 f.explanation, f.recommendation, f.status, f.created_at
+	                 f.explanation, f.status, f.created_at
 	          FROM detection_flags f
-	          WHERE f.org_id = $1`
+	          WHERE f.org_id = $1
+	            AND f.detection_run_id IN (
+	                SELECT MAX(id) FROM detection_runs WHERE org_id = $1 GROUP BY statement_id
+	            )`
 	args := []interface{}{orgID}
 	n := 2
 
@@ -387,7 +401,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 		rows.Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
 			&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 			&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-			&f.Explanation, &f.Recommendation, &f.Status, &f.CreatedAt)
+			&f.Explanation, &f.Status, &f.CreatedAt)
 		out = append(out, f)
 	}
 	return &ListFlagsResponse{Flags: out}, nil
@@ -405,13 +419,13 @@ func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 		`SELECT id, org_id, detection_run_id, statement_line_id, work_id,
 		        work_title, iswc, expected_amount, received_amount,
 		        deviation_amount, deviation_pct, severity, pattern_type,
-		        explanation, recommendation, status, created_at
+		        explanation, status, created_at
 		 FROM detection_flags WHERE id=$1 AND org_id=$2`,
 		req.ID, orgID,
 	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
 		&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 		&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-		&f.Explanation, &f.Recommendation, &f.Status, &f.CreatedAt)
+		&f.Explanation, &f.Status, &f.CreatedAt)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.NotFound, Message: "deviation not found"}
 	}

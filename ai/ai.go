@@ -32,21 +32,23 @@ func initService() (*Service, error) {
 
 // ExplainRequest carries the deviation data for one detection flag.
 type ExplainRequest struct {
-	WorkTitle    string  `json:"work_title"`
-	ISWC         string  `json:"iswc"`
-	RightType    string  `json:"right_type"`
-	Period       string  `json:"period"`
-	Severity     string  `json:"severity"`
-	ExpectedSEK  float64 `json:"expected_sek"`
-	ReceivedSEK  float64 `json:"received_sek"`
-	DeviationSEK float64 `json:"deviation_sek"` // negative = underpayment
-	DeviationPct float64 `json:"deviation_pct"` // fractional, signed (−0.25 = 25% under)
+	WorkTitle       string  `json:"work_title"`
+	ISWC            string  `json:"iswc"`
+	RightType       string  `json:"right_type"`
+	Period          string  `json:"period"`
+	Severity        string  `json:"severity"`
+	GrossSEK        float64 `json:"gross_sek"`
+	ControlledShare float64 `json:"controlled_share"` // 0–1
+	ExpectedSEK     float64 `json:"expected_sek"`
+	ReceivedSEK     float64 `json:"received_sek"`
+	DeviationSEK    float64 `json:"deviation_sek"` // negative = underpayment
+	DeviationPct    float64 `json:"deviation_pct"` // fractional, signed (−0.25 = 25% under)
 }
 
-// ExplainResponse is stored on the detection_flags row (explanation + recommendation).
+// ExplainResponse carries only the why-explanation stored on the detection_flags row.
+// Recommendations are generated deterministically by rules.Recommend — not by AI.
 type ExplainResponse struct {
-	Explanation    string `json:"explanation"`
-	Recommendation string `json:"recommendation"`
+	Explanation string `json:"explanation"`
 }
 
 // ExplainDeviation calls the Claude API and returns a plain-English explanation
@@ -92,9 +94,12 @@ func (s *Service) ExplainDeviation(ctx context.Context, req *ExplainRequest) (*E
 }
 
 const systemPrompt = `You are a royalty statement analyst for a Nordic music publisher.
-Your job is to explain payment deviations to copyright administrators who manage the publisher's catalogue.
-Write in plain English. No technical jargon. A copyright administrator who is not a software engineer must understand every word.
-Always respond with valid JSON only — no markdown, no code fences — with exactly two string fields: "explanation" and "recommendation".`
+Your job is to explain WHY a payment deviation occurred on a STIM royalty statement.
+The expected payment is always calculated as: gross × controlled share × 1/3 (the STIM distribution key).
+A deviation means one of three things went wrong: the gross STIM reported differs from what was collected, the controlled share on record differs from what STIM holds, or STIM applied the distribution key incorrectly.
+Write in plain English. No technical jargon. A copyright administrator — not a software engineer — must understand every word.
+Do not tell the administrator what to do. Only explain why the deviation most likely occurred.
+Always respond with valid JSON only — no markdown, no code fences — with exactly one string field: "explanation".`
 
 func buildPrompt(req *ExplainRequest) string {
 	direction := "overpayment"
@@ -106,26 +111,28 @@ func buildPrompt(req *ExplainRequest) string {
 		absPct = -absPct
 	}
 
-	return fmt.Sprintf(`A %s was detected on the following STIM royalty line:
+	return fmt.Sprintf(`A %s was detected on this STIM royalty line:
 
-Work:       %s (ISWC: %s)
-Period:     %s
-Right type: %s
-Expected:   %.2f SEK
-Received:   %.2f SEK
-Difference: %.2f SEK (%.1f%%)
-Severity:   %s
+Work:             %s (ISWC: %s)
+Period:           %s
+Right type:       %s
+Gross collected:  %.2f SEK
+Controlled share: %.0f%%
+Expected payment: %.2f SEK  (= %.2f × %.0f%% × 1/3)
+Received payment: %.2f SEK
+Difference:       %.2f SEK (%.1f%%)
+Severity:         %s
 
-Write:
-- "explanation": 2–3 sentences explaining what this deviation means and what may have caused it. Write for a copyright administrator — no technical language.
-- "recommendation": 1–2 sentences telling the administrator exactly what to do next.
-
-Respond with valid JSON only.`,
+Explain in 2–3 sentences WHY this deviation most likely occurred.
+Reason through which of the three inputs — gross, controlled share, or the distribution key — is most likely wrong, and what that means in practice for this work.
+Respond with valid JSON only: {"explanation": "..."}`,
 		direction,
 		req.WorkTitle, req.ISWC,
 		req.Period,
 		req.RightType,
-		req.ExpectedSEK,
+		req.GrossSEK,
+		req.ControlledShare*100,
+		req.ExpectedSEK, req.GrossSEK, req.ControlledShare*100,
 		req.ReceivedSEK,
 		req.DeviationSEK, absPct*100,
 		req.Severity,

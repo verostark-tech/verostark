@@ -13,37 +13,6 @@ import (
 )
 
 // =============================================================================
-// CWR catalogue import
-// =============================================================================
-
-type ProcessCWRRequest struct {
-	FileKey string `json:"file_key"`
-}
-
-// ProcessCWR downloads an uploaded CWR file, parses it, and stores the works
-// and writers into the publisher catalogue. Call /files/upload first to obtain
-// the file_key.
-//
-//encore:api auth method=POST path=/api/cwr
-func ProcessCWR(ctx context.Context, req *ProcessCWRRequest) (*statements.ProcessCWRResponse, error) {
-	if req.FileKey == "" {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_key is required"}
-	}
-	return statements.ProcessCWR(ctx, &statements.ProcessCWRRequest{FileKey: req.FileKey})
-}
-
-// =============================================================================
-// Works catalogue
-// =============================================================================
-
-// ListWorks returns all registered catalogue works for the organisation.
-//
-//encore:api auth method=GET path=/api/works
-func ListWorks(ctx context.Context) (*statements.ListWorksResponse, error) {
-	return statements.ListWorks(ctx)
-}
-
-// =============================================================================
 // Statements
 // =============================================================================
 
@@ -116,8 +85,7 @@ func GetDeviation(ctx context.Context, id int64) (*detectionsvc.Flag, error) {
 // =============================================================================
 
 // GetUnmatched returns lines from the latest detection run for a statement that
-// could not be matched to the catalogue or evaluated. These are works the
-// administrator should investigate or register before re-running detection.
+// could not be evaluated — unknown right type or missing controlled share.
 //
 //encore:api auth method=GET path=/api/statements/:id/unmatched
 func GetUnmatched(ctx context.Context, id int64) (*detectionsvc.GetUnmatchedResponse, error) {
