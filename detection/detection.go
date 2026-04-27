@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -107,6 +108,62 @@ type GetUnmatchedResponse struct {
 	Lines []UnmatchedLine `json:"lines"`
 }
 
+// ProgressResponse is the payload polled by the frontend every ~500 ms.
+// Phase values: reading | identifying | loading_key | checking_ratios | explaining | done | failed
+type ProgressResponse struct {
+	Phase           string  `json:"phase"`
+	WorksTotal      int     `json:"works_total"`
+	WorksChecked    int     `json:"works_checked"`
+	DistributionKey string  `json:"distribution_key"`
+	FlagCount       int     `json:"flag_count"`
+	UnmatchedCount  int     `json:"unmatched_count"`
+	Error           *string `json:"error"`
+}
+
+type GetProgressRequest struct {
+	StatementID int64 `json:"statement_id"`
+}
+
+const distributionKey = "Standard 1/3 mechanical share · Sweden"
+
+// setProgress upserts the current detection phase into detection_progress.
+// Errors are silently ignored — progress is best-effort.
+func setProgress(ctx context.Context, stmtID int64, orgID string, p ProgressResponse) {
+	db.Exec(ctx,
+		`INSERT INTO detection_progress
+		     (statement_id, org_id, phase, works_total, works_checked,
+		      flag_count, unmatched_count, error, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+		 ON CONFLICT (statement_id) DO UPDATE SET
+		     phase=EXCLUDED.phase, works_total=EXCLUDED.works_total,
+		     works_checked=EXCLUDED.works_checked, flag_count=EXCLUDED.flag_count,
+		     unmatched_count=EXCLUDED.unmatched_count, error=EXCLUDED.error,
+		     updated_at=NOW()`,
+		stmtID, orgID, p.Phase, p.WorksTotal, p.WorksChecked,
+		p.FlagCount, p.UnmatchedCount, p.Error,
+	)
+}
+
+// GetProgress returns the current detection phase and counts for a statement.
+// Returns phase="reading" with zero counts when detection has not started yet.
+//
+//encore:api private
+func GetProgress(ctx context.Context, req *GetProgressRequest) (*ProgressResponse, error) {
+	data := encoreauth.Data().(*authsvc.AuthData)
+	orgID := data.OrgID
+
+	p := &ProgressResponse{DistributionKey: distributionKey}
+	err := db.QueryRow(ctx,
+		`SELECT phase, works_total, works_checked, flag_count, unmatched_count, error
+		 FROM detection_progress WHERE statement_id=$1 AND org_id=$2`,
+		req.StatementID, orgID,
+	).Scan(&p.Phase, &p.WorksTotal, &p.WorksChecked, &p.FlagCount, &p.UnmatchedCount, &p.Error)
+	if err != nil {
+		p.Phase = "reading"
+	}
+	return p, nil
+}
+
 // --- Private API ---
 
 // RunDetection evaluates every line in the given statement using exact rational
@@ -119,8 +176,15 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
+	// Phase: reading — fetch statement metadata.
+	setProgress(ctx, req.StatementID, orgID, ProgressResponse{
+		Phase: "reading", DistributionKey: distributionKey,
+	})
+
 	stmt, err := statements.GetStatement(ctx, &statements.GetStatementRequest{ID: req.StatementID})
 	if err != nil {
+		errMsg := err.Error()
+		setProgress(ctx, req.StatementID, orgID, ProgressResponse{Phase: "failed", Error: &errMsg})
 		return nil, err
 	}
 
@@ -137,12 +201,17 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		return nil, &errs.Error{Code: errs.Internal, Message: "could not start detection run"}
 	}
 
+	// Phase: identifying — load all statement lines, report total count.
 	linesResp, err := statements.ListStatementLines(ctx, &statements.ListStatementLinesRequest{
 		StatementID: stmt.ID,
 	})
 	if err != nil {
 		return nil, err
 	}
+	totalLines := len(linesResp.Lines)
+	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+		Phase: "identifying", WorksTotal: totalLines, DistributionKey: distributionKey,
+	})
 
 	// Delete flags from any previous runs for this statement so re-runs replace, not accumulate.
 	db.Exec(ctx,
@@ -152,6 +221,11 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		 )`,
 		stmt.ID, orgID, runID,
 	)
+
+	// Phase: loading_key — distribution key is loaded, about to evaluate.
+	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+		Phase: "loading_key", WorksTotal: totalLines, DistributionKey: distributionKey,
+	})
 
 	// pendingFlag holds everything needed to insert one detection_flags row.
 	type pendingFlag struct {
@@ -169,7 +243,16 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 	var pending []pendingFlag
 
 	// ── Pass 1: evaluate every line (pure arithmetic, no I/O) ─────────────────
-	for _, line := range linesResp.Lines {
+	for i, line := range linesResp.Lines {
+		if i%5 == 0 {
+			setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+				Phase:           "checking_ratios",
+				WorksTotal:      totalLines,
+				WorksChecked:    i,
+				UnmatchedCount:  unmatchedCount,
+				DistributionKey: distributionKey,
+			})
+		}
 		if line.GrossCents == 0 {
 			continue
 		}
@@ -238,9 +321,25 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 	}
 
 	// ── Pass 2: fan out Claude calls (max aiConcurrency in-flight) ────────────
+	var aiCallCount int
+	for _, pf := range pending {
+		if pf.aiReq != nil {
+			aiCallCount++
+		}
+	}
+	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+		Phase:           "explaining",
+		WorksTotal:      aiCallCount,
+		WorksChecked:    0,
+		FlagCount:       0,
+		UnmatchedCount:  unmatchedCount,
+		DistributionKey: distributionKey,
+	})
+
 	sem := make(chan struct{}, aiConcurrency)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var explained int32 // atomic counter for progress updates
 
 	for i := range pending {
 		if pending[i].aiReq == nil {
@@ -259,6 +358,15 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 				pending[i].nextStep = resp.NextStep
 				mu.Unlock()
 			}
+			n := int(atomic.AddInt32(&explained, 1))
+			setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+				Phase:           "explaining",
+				WorksTotal:      aiCallCount,
+				WorksChecked:    n,
+				FlagCount:       n,
+				UnmatchedCount:  unmatchedCount,
+				DistributionKey: distributionKey,
+			})
 		}(i)
 	}
 	wg.Wait()
@@ -289,6 +397,16 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 	)
 	statements.UpdateStatementStatus(ctx, &statements.UpdateStatementStatusRequest{
 		ID: stmt.ID, Status: "completed",
+	})
+
+	// Phase: done — all flags written.
+	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
+		Phase:           "done",
+		WorksTotal:      totalLines,
+		WorksChecked:    totalLines,
+		FlagCount:       flagCount,
+		UnmatchedCount:  unmatchedCount,
+		DistributionKey: distributionKey,
 	})
 
 	return &RunDetectionResponse{

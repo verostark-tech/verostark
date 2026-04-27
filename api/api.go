@@ -91,3 +91,13 @@ func GetDeviation(ctx context.Context, id int64) (*detectionsvc.Flag, error) {
 func GetUnmatched(ctx context.Context, id int64) (*detectionsvc.GetUnmatchedResponse, error) {
 	return detectionsvc.GetUnmatched(ctx, &detectionsvc.GetUnmatchedRequest{StatementID: id})
 }
+
+// GetDetectionProgress returns the current phase and counts for a detection run.
+// Poll every ~500 ms while phase is not "done" or "failed".
+//
+// Phases: reading | identifying | loading_key | checking_ratios | explaining | done | failed
+//
+//encore:api auth method=GET path=/api/statements/:id/detection-progress
+func GetDetectionProgress(ctx context.Context, id int64) (*detectionsvc.ProgressResponse, error) {
+	return detectionsvc.GetProgress(ctx, &detectionsvc.GetProgressRequest{StatementID: id})
+}
