@@ -1,15 +1,10 @@
-// Package statements manages the publisher catalogue (works, writers) and
-// uploaded royalty statements. CWR import populates the catalogue; statement
-// records are created after each file upload and consumed by the detection service.
+// Package statements manages uploaded royalty statements. CRD file upload
+// populates statement_lines; those lines are consumed by the detection service.
 package statements
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
-	"io"
-	"strconv"
-	"strings"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -17,6 +12,7 @@ import (
 	"encore.dev/storage/sqldb"
 
 	authsvc "encore.app/auth"
+	"encore.app/crd"
 	"encore.app/cwr"
 	filessvc "encore.app/files"
 	"encore.app/validators"
@@ -39,22 +35,36 @@ type Statement struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// StatementLine is one row from a parsed royalty statement.
+// StatementLine is one parsed royalty line from a CRD WER record.
+//
+// The _cents and controlled_numerator/denominator fields carry exact integer
+// values used by the detection engine via math/big.Rat. The float64 fields
+// (GrossAmount, NetAmount, ControlledShare) are approximations for API output
+// and AI explanations only — they must not be used in royalty calculations.
 type StatementLine struct {
-	ID              int64    `json:"id"`
-	OrgID           string   `json:"org_id"`
-	StatementID     int64    `json:"statement_id"`
-	WorkRef         string   `json:"work_ref"`
-	WorkTitle       string   `json:"work_title"`
-	ISWC            string   `json:"iswc"`
-	Territory       string   `json:"territory"`
-	RightType       string   `json:"right_type"`
-	Source          string   `json:"source"`
+	ID          int64  `json:"id"`
+	OrgID       string `json:"org_id"`
+	StatementID int64  `json:"statement_id"`
+	WorkRef     string `json:"work_ref"`
+	WorkTitle   string `json:"work_title"`
+	ISWC        string `json:"iswc"`
+	Territory   string `json:"territory"`
+	RightType   string `json:"right_type"`
+	Source      string `json:"source"`
+	Currency    string `json:"currency"`
+	Period      string `json:"period"`
+
+	// Display-only float64 amounts. Do not use in detection calculations.
 	NetAmount       float64 `json:"net_amount"`
 	GrossAmount     float64 `json:"gross_amount"`
-	ControlledShare float64 `json:"controlled_share"`
-	Currency        string   `json:"currency"`
-	Period          string   `json:"period"`
+	ControlledShare float64 `json:"controlled_share"` // numerator/denominator as float
+
+	// Exact integer amounts for detection (2 implied decimal places for SEK).
+	// GrossCents=372000 represents 3720.00 SEK.
+	GrossCents            int64 `json:"gross_cents"`
+	NetCents              int64 `json:"net_cents"`
+	ControlledNumerator   int64 `json:"controlled_numerator"`
+	ControlledDenominator int64 `json:"controlled_denominator"`
 }
 
 // Work is a registered catalogue work (imported from CWR).
@@ -68,7 +78,6 @@ type Work struct {
 }
 
 // WorkMatch is the result of matching a statement line to a catalogue work.
-// ControlledShare is the summed manuscript share across all controlled writers.
 type WorkMatch struct {
 	WorkID          int64   `json:"work_id"`
 	Title           string  `json:"title"`
@@ -124,8 +133,7 @@ type ListWorksResponse struct {
 // --- Private API ---
 
 // ProcessCWR downloads a previously uploaded CWR file, parses it, and stores
-// all works and writers into the catalogue. Idempotent for works with ISWCs
-// already in the catalogue — existing works are reused, not duplicated.
+// all works and writers into the catalogue.
 //
 //encore:api private
 func ProcessCWR(ctx context.Context, req *ProcessCWRRequest) (*ProcessCWRResponse, error) {
@@ -146,7 +154,7 @@ func ProcessCWR(ctx context.Context, req *ProcessCWRRequest) (*ProcessCWRRespons
 	return storeWorks(ctx, orgID, records)
 }
 
-// storeWorks persists parsed CWR records. Called only by ProcessCWR.
+// storeWorks persists parsed CWR records.
 func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*ProcessCWRResponse, error) {
 	var worksStored, writersStored int
 
@@ -156,7 +164,6 @@ func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*P
 			iswc = validators.NormaliseISWC(rec.Work.ISWC)
 		}
 
-		// Look up existing work by ISWC; insert if not found.
 		var workID int64
 		if iswc != "" {
 			db.QueryRow(ctx,
@@ -175,7 +182,6 @@ func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*P
 			worksStored++
 		}
 
-		// Insert each writer and the work_writer link.
 		for _, w := range rec.Writers {
 			ipiName := validators.NormaliseIPIName(w.IPIName)
 
@@ -199,7 +205,6 @@ func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*P
 				writersStored++
 			}
 
-			// Skip if this work_writer link already exists.
 			var linkExists bool
 			db.QueryRow(ctx,
 				`SELECT EXISTS(SELECT 1 FROM work_writers WHERE org_id=$1 AND work_id=$2 AND writer_id=$3)`,
@@ -220,8 +225,8 @@ func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*P
 	return &ProcessCWRResponse{WorksStored: worksStored, WritersStored: writersStored}, nil
 }
 
-// CreateStatement registers a new statement upload record and parses its lines.
-// FileKey must be the storage key returned by /files/upload.
+// CreateStatement registers a new statement upload record and parses its CRD lines.
+// FileKey must be the storage key returned by /files/upload for a .crd file.
 //
 //encore:api private
 func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Statement, error) {
@@ -235,9 +240,16 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 	r := filessvc.Uploads.Download(ctx, req.FileKey)
 	defer r.Close()
 
-	lines, err := parseSTIM(r)
-	if err != nil {
-		return nil, err
+	crdLines, parseErrs := crd.ParseFile(r)
+	for _, e := range parseErrs {
+		// Log parse warnings but do not abort — partial results are still useful.
+		_ = e
+	}
+	if len(crdLines) == 0 {
+		return nil, &errs.Error{
+			Code:    errs.InvalidArgument,
+			Message: "no WER records found in the file — check that it is a valid CISAC CRD file",
+		}
 	}
 
 	var s Statement
@@ -250,18 +262,50 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 		return nil, &errs.Error{Code: errs.Internal, Message: "could not register statement"}
 	}
 
-	for _, line := range lines {
+	for _, l := range crdLines {
+		grossCents := l.GrossCents
+		netCents := l.NetCents
+		grossSEK := float64(grossCents) / 100.0
+		netSEK := float64(netCents) / 100.0
+		controlledShare := 0.0
+		if l.ControlledDenominator != 0 {
+			controlledShare = float64(l.ControlledNumerator) / float64(l.ControlledDenominator)
+		}
+
 		db.Exec(ctx,
 			`INSERT INTO statement_lines
 			    (org_id, statement_id, work_ref, work_title, iswc, source, right_type,
-			     net_amount, gross_amount, controlled_share, currency, period)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'SEK',$11)`,
-			orgID, s.ID, line.WorkRef, line.WorkTitle, line.ISWC, line.Source, line.RightType,
-			line.NetAmount, line.GrossAmount, line.ControlledShare, s.Period,
+			     net_amount, gross_amount, controlled_share, currency, period,
+			     gross_cents, net_cents, controlled_numerator, controlled_denominator)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			orgID, s.ID,
+			l.WorkRef, l.WorkTitle, l.ISWC,
+			"",                     // source: not present in CRD WER record
+			mapRightCategory(l.RightCategory),
+			netSEK, grossSEK, controlledShare,
+			l.Currency, req.Period,
+			grossCents, netCents,
+			l.ControlledNumerator, l.ControlledDenominator,
 		)
 	}
 
 	return &s, nil
+}
+
+// mapRightCategory maps a CRD right_category code to the canonical right_type string.
+// "MEC" → "mechanical", "PER" → "performance", anything else passed through lowercased.
+func mapRightCategory(rc string) string {
+	switch rc {
+	case "MEC":
+		return "mechanical"
+	case "PER":
+		return "performance"
+	default:
+		if rc == "" {
+			return ""
+		}
+		return rc
+	}
 }
 
 // ListStatements returns all statements for the org, newest first.
@@ -319,7 +363,8 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 
 	rows, err := db.Query(ctx,
 		`SELECT id, org_id, statement_id, work_ref, work_title, iswc, right_type, source,
-		        net_amount, gross_amount, controlled_share, currency, period
+		        net_amount, gross_amount, controlled_share, currency, period,
+		        gross_cents, net_cents, controlled_numerator, controlled_denominator
 		 FROM statement_lines WHERE statement_id=$1 AND org_id=$2`,
 		req.StatementID, orgID,
 	)
@@ -331,8 +376,12 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	var out []StatementLine
 	for rows.Next() {
 		var l StatementLine
-		if err := rows.Scan(&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.WorkTitle, &l.ISWC,
-			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.ControlledShare, &l.Currency, &l.Period); err != nil {
+		if err := rows.Scan(
+			&l.ID, &l.OrgID, &l.StatementID, &l.WorkRef, &l.WorkTitle, &l.ISWC,
+			&l.RightType, &l.Source, &l.NetAmount, &l.GrossAmount, &l.ControlledShare,
+			&l.Currency, &l.Period,
+			&l.GrossCents, &l.NetCents, &l.ControlledNumerator, &l.ControlledDenominator,
+		); err != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: "could not read statement line"}
 		}
 		out = append(out, l)
@@ -340,8 +389,7 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 	return &ListStatementLinesResponse{Lines: out}, nil
 }
 
-// GetWorkForLine matches a statement line's ISWC to a catalogue work and returns
-// the summed controlled manuscript share across all controlled writers.
+// GetWorkForLine matches a statement line's ISWC to a catalogue work.
 //
 //encore:api private
 func GetWorkForLine(ctx context.Context, req *GetWorkForLineRequest) (*WorkMatch, error) {
@@ -404,142 +452,7 @@ func UpdateStatementStatus(ctx context.Context, req *UpdateStatementStatusReques
 		req.Status, req.ID, orgID,
 	)
 	if err != nil {
-		return &errs.Error{Code: errs.Internal, Message: "could not update statement status"}
+		return &errs.Error{Code: errs.Internal, Message: fmt.Sprintf("could not update statement status: %v", err)}
 	}
 	return nil
-}
-
-// parseSTIM parses a STIM Sweden CSV royalty statement.
-//
-// SYNTHETIC DATA: This parser was built against the synthetic test fixture
-// synthetic_statement_MEC_2025Q1.csv. Real STIM statements may differ in
-// column names, ordering, encoding, or value formats. Validate against the
-// official STIM file specification before using in production.
-//
-// Expected columns (order-independent, matched by header name):
-//
-//	Work ID | Title | Source | Right Type | Gross | ISWC |
-//	Controlled by Publisher (%) | Interested Party | Role |
-//	Manuscript Share (%) | Amount before fee | Fee (%) | Fee Amount | Net Amount
-//
-// Right Type values: "M" → mechanical, "P" → performance.
-//
-// STIM issues one row per writer for multi-writer works, each row carrying the
-// same gross. Lines are aggregated per (Work ID, Right Type) so the detection
-// engine receives the total publisher net for the work — not a per-writer slice.
-func parseSTIM(r io.Reader) ([]StatementLine, error) {
-	reader := csv.NewReader(r)
-	reader.TrimLeadingSpace = true
-
-	header, err := reader.Read()
-	if err != nil {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "could not read CSV header"}
-	}
-
-	// Index columns by lowercase trimmed name so column matching is
-	// case-insensitive. Real STIM files vary in capitalisation.
-	idx := make(map[string]int, len(header))
-	for i, h := range header {
-		idx[strings.ToLower(strings.TrimSpace(h))] = i
-	}
-
-	for _, col := range []string{"work id", "gross", "right type", "net amount", "iswc"} {
-		if _, ok := idx[col]; !ok {
-			return nil, &errs.Error{
-				Code:    errs.InvalidArgument,
-				Message: fmt.Sprintf("missing required column %q — is this a STIM CSV file?", col),
-			}
-		}
-	}
-
-	sourceIdx, hasSource := idx["source"]
-	titleIdx, hasTitle := idx["title"]
-	controlledPctIdx, hasControlledPct := idx["controlled by publisher (%)"]
-	manuscriptShareIdx, hasManuscriptShare := idx["manuscript share (%)"]
-
-	type aggKey struct{ workRef, rightType string }
-	agg := map[aggKey]*StatementLine{}
-	var order []aggKey
-
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "malformed CSV row"}
-		}
-
-		gross, err := strconv.ParseFloat(strings.TrimSpace(row[idx["gross"]]), 64)
-		if err != nil {
-			continue
-		}
-		net, err := strconv.ParseFloat(strings.TrimSpace(row[idx["net amount"]]), 64)
-		if err != nil {
-			continue
-		}
-
-		rt := strings.ToUpper(strings.TrimSpace(row[idx["right type"]]))
-		switch rt {
-		case "M":
-			rt = "mechanical"
-		case "P":
-			rt = "performance"
-		default:
-			rt = strings.ToLower(rt)
-		}
-
-		workRef := strings.TrimSpace(row[idx["work id"]])
-		iswc := strings.TrimSpace(row[idx["iswc"]])
-
-		source := ""
-		if hasSource {
-			source = strings.TrimSpace(row[sourceIdx])
-		}
-
-		workTitle := ""
-		if hasTitle {
-			workTitle = strings.TrimSpace(row[titleIdx])
-		}
-
-		// controlled_share for this writer row = controlled_by_publisher × manuscript_share.
-		// Both columns carry decimal values in the 0–1 range (1.0 = 100%, 0.5 = 50%).
-		var controlledShare float64
-		if hasControlledPct && hasManuscriptShare {
-			cp, e1 := strconv.ParseFloat(strings.TrimSpace(row[controlledPctIdx]), 64)
-			ms, e2 := strconv.ParseFloat(strings.TrimSpace(row[manuscriptShareIdx]), 64)
-			if e1 == nil && e2 == nil {
-				controlledShare = cp * ms
-			}
-		}
-
-		key := aggKey{workRef: workRef, rightType: rt}
-		if existing, ok := agg[key]; ok {
-			existing.GrossAmount += gross
-			existing.NetAmount += net
-			existing.ControlledShare += controlledShare
-		} else {
-			agg[key] = &StatementLine{
-				WorkRef:         workRef,
-				WorkTitle:       workTitle,
-				ISWC:            iswc,
-				Source:          source,
-				RightType:       rt,
-				NetAmount:       net,
-				GrossAmount:     gross,
-				ControlledShare: controlledShare,
-			}
-			order = append(order, key)
-		}
-	}
-
-	if len(agg) == 0 {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "no statement lines found in the file"}
-	}
-
-	lines := make([]StatementLine, 0, len(agg))
-	for _, k := range order {
-		lines = append(lines, *agg[k])
-	}
-	return lines, nil
 }

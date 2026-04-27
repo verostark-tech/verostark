@@ -1,0 +1,429 @@
+SDN                                                                                                             2      SEK
+MWN                STIM10000001  SOMMARNATT                                                                                                              T0010000011
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000300000                                                                                   000000000000100000
+MWN                STIM10000002  DROMMAR                                                                                                                 T0010000022
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001500000                                                                                   000000000000500000
+MWN                STIM10000003  HJARTATS SANG                                                                                                           T0010000033
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000006000000                                                                                   000000000002000000
+MWN                STIM10000004  HAVET KALLAR                                                                                                            T0010000044
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000090000                                                                                   000000000000030000
+MWN                STIM10000005  VINTERMELODI                                                                                                            T0010000055
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000009000000                                                                                   000000000003000000
+MWN                STIM10000006  REGN OCH SOL                                                                                                            T0010000066
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000400000                                                                                   000000000000100000
+MWN                STIM10000007  STORMEN                                                                                                                 T0010000077
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001000000                                                                                   000000000000250000
+MWN                STIM10000008  LJUSET ATERGAR                                                                                                          T0010000088
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000150000                                                                                   000000000000025000
+MWN                STIM10000009  MORKETS ROST                                                                                                            T0010000099
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000006000000                                                                                   000000000001000000
+MWN                STIM10000010  KARLEKENS VAG                                                                                                           T0010000100
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000100000                                                                                   000000000000011110
+MWN                STIM10000011  FRIHETENS VIND                                                                                                          T0010000111
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001000000                                                                                   000000000000111100
+MWN                STIM10000012  HIMLENS PORT                                                                                                            T0010000122
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000005000000                                                                                   000000000000555500
+MWN                STIM10000013  STJARNORNAS DANS                                                                                                        T0010000133
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000360000                                                                                   000000000000030000
+MWN                STIM10000014  MANENS SKUGGA                                                                                                           T0010000144
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001200000                                                                                   000000000000100000
+MWN                STIM10000015  BERGETS EKKO                                                                                                            T0010000155
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000300000                                                                                   000000000000066670
+MWN                STIM10000016  SKOGENS HEMLIGHET                                                                                                       T0010000166
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003000000                                                                                   000000000000666700
+MWN                STIM10000017  FLODENS SANG                                                                                                            T0010000177
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000750000                                                                                   000000000000100000
+MWN                STIM10000018  STADENS PULS                                                                                                            T0010000188
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000150000                                                                                   000000000000020000
+MWN                STIM10000019  HEMVAGEN                                                                                                                T0010000199
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000375000                                                                                   000000000000100000
+MWN                STIM10000020  HOPPETS FLAMMA                                                                                                          T0010000200
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003000000                                                                                   000000000000100000
+MWN                STIM10000021  SOLUPPGANG                                                                                                              T0010000211
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000009000000                                                                                   000000000000300000
+MWN                STIM10000022  SKYMNING                                                                                                                T0010000222
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001000000                                                                                   000000000000300000
+MWN                STIM10000023  GRYNING                                                                                                                 T0010000233
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001000000                                                                                   000000000000050000
+MWN                STIM10000024  MIDNATT OVER STOCKHOLM                                                                                                  T0010000244
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000500000                                                                                   000000000000100000
+MWN                STIM10000025  KVALLSANG                                                                                                               T0010000255
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002500000                                                                                   000000000000500000
+MWN                STIM10000026  BLUE HORIZON                                                                                                            T0010000266
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000372000                                                                                   000000000000124248
+MWN                STIM10000027  OCEAN DRIVE                                                                                                             T0010000277
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000500000                                                                                   000000000000126000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000250000                                                                                   000000000000062370
+MWN                STIM10000028  MIDNIGHT EXPRESS                                                                                                        T0010000288
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000180000                                                                                   000000000000030449
+MWN                STIM10000029  GOLDEN HOUR                                                                                                             T0010000299
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002100000                                                                                   000000000000238442
+WER                               ME                                                                                                                                                                                                                 SEK000000000001050000                                                                                   000000000000118029
+MWN                STIM10000030  SILVER RAIN                                                                                                             T0010000300
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000750000                                                                                   000000000000064375
+WER                               ME                                                                                                                                                                                                                 SEK000000000000375000                                                                                   000000000000031865
+MWN                STIM10000031  NORTHERN LIGHTS                                                                                                         T0010000311
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003600000                                                                                   000000000000832841
+MWN                STIM10000032  ARCTIC DREAM                                                                                                            T0010000322
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000280000                                                                                   000000000000039312
+MWN                STIM10000033  BOREAL TIDE                                                                                                             T0010000333
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000900000                                                                                   000000000000254880
+MWN                STIM10000034  TUNDRA SONG                                                                                                             T0010000344
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000006000000                                                                                   000000000000214200
+MWN                STIM10000035  FJORD ECHO                                                                                                              T0010000355
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000450000                                                                                   000000000000146070
+MWN                STIM10000036  BLACK FOREST WALK                                                                                                       T0010000366
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001500000                                                                                   000000000000081600
+MWN                STIM10000037  WHITE MOUNTAINS HIGH                                                                                                    T0010000377
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000800000                                                                                   000000000000174720
+WER                               ME                                                                                                                                                                                                                 SEK000000000000400000                                                                                   000000000000086486
+MWN                STIM10000038  RED AURORA RISING                                                                                                       T0010000388
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001200000                                                                                   000000000000401199
+MWN                STIM10000039  GREEN VALLEY LOW                                                                                                        T0010000399
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000004500000                                                                                   000000000000783750
+WER                               ME                                                                                                                                                                                                                 SEK000000000002250000                                                                                   000000000000387956
+MWN                STIM10000040  DEEP BLUE SKY                                                                                                           T0010000400
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002700000                                                                                   000000000000740475
+MWN                STIM10000041  EARLY MORNING FOG                                                                                                       T0010000411
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000102600                                                                                   000000000000037620
+MWN                STIM10000042  LATE EVENING GLOW                                                                                                       T0010000422
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000250000                                                                                   000000000000070625
+MWN                STIM10000043  SUNDAY SILENCE FALLS                                                                                                    T0010000433
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000600000                                                                                   000000000000118000
+MWN                STIM10000044  FRIDAY FEELING GOOD                                                                                                     T0010000444
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001400000                                                                                   000000000000189758
+MWN                STIM10000045  WEEKEND MOOD SHIFT                                                                                                      T0010000455
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003500000                                                                                   000000000000370416
+MWN                STIM10000046  SPRING RAIN FALLS SOFT                                                                                                  T0010000466
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000085000                                                                                   000000000000024745
+WER                               ME                                                                                                                                                                                                                 SEK000000000000074131                                                                                   000000000000021581
+MWN                STIM10000047  SUMMER HEAT WAVE LONG                                                                                                   T0010000477
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000420000                                                                                   000000000000075600
+WER                               ME                                                                                                                                                                                                                 SEK000000000000328313                                                                                   000000000000059096
+MWN                STIM10000048  AUTUMN LEAVES TURN RED                                                                                                  T0010000488
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000980000                                                                                   000000000000363253
+MWN                STIM10000049  WINTER FROST BITES HARD                                                                                                 T0010000499
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002200000                                                                                   000000000000104866
+WER                               ME                                                                                                                                                                                                                 SEK000000000002951147                                                                                   000000000000140671
+MWN                STIM10000050  HARVEST MOON RISES SLOW                                                                                                 T0010000500
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000007500000                                                                                   000000000003285000
+WER                               ME                                                                                                                                                                                                                 SEK000000000007204550                                                                                   000000000003155592
+MWN                STIM10000051  BALLAD IN D MINOR                                                                                                       T0010000511
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000170000                                                                                   000000000000009435
+WER                               ME                                                                                                                                                                                                                 SEK000000000000151958                                                                                   000000000000008433
+MWN                STIM10000052  NOCTURNE NUMBER SEVEN                                                                                                   T0010000522
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000350000                                                                                   000000000000080499
+MWN                STIM10000053  PRELUDE IN C MINOR                                                                                                      T0010000533
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000750000                                                                                   000000000000300000
+MWN                STIM10000054  ETUDE FOR STRINGS                                                                                                       T0010000544
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001800000                                                                                   000000000000562500
+MWN                STIM10000055  FANTASIA BOREALIS                                                                                                       T0010000555
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000004200000                                                                                   000000000000910000
+WER                               ME                                                                                                                                                                                                                 SEK000000000005790892                                                                                   000000000001254693
+MWN                STIM10000056  VALS OVER DALARNA                                                                                                       T0010000566
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000065000                                                                                   000000000000009604
+MWN                STIM10000057  POLKA STOCKHOLM STYLE                                                                                                   T0010000577
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000320000                                                                                   000000000000036533
+MWN                STIM10000058  SERENAD TILL SOFIA                                                                                                      T0010000588
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000870000                                                                                   000000000000272613
+WER                               ME                                                                                                                                                                                                                 SEK000000000000958561                                                                                   000000000000300364
+MWN                STIM10000059  CAPRICCIO IN G MAJOR                                                                                                    T0010000599
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002600000                                                                                   000000000000502666
+MWN                STIM10000060  INTERMEZZO LENTO                                                                                                        T0010000600
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000009000000                                                                                   000000000003552000
+MWN                STIM10000061  DIGITAL DAWN BREAKS                                                                                                     T0010000611
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000500000                                                                                   000000000000083325
+WER                               ME                                                                                                                                                                                                                 SEK000000000000234107                                                                                   000000000000039013
+MWN                STIM10000062  ANALOG DUSK SETTLES                                                                                                     T0010000622
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000800000                                                                                   000000000000105333
+MWN                STIM10000063  SYNTHETIC SOUL RISES                                                                                                    T0010000633
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001200000                                                                                   000000000000445355
+MWN                STIM10000064  ELECTRIC DREAM FADES                                                                                                    T0010000644
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002800000                                                                                   000000000000653333
+MWN                STIM10000065  NEON TIDE FLOWS                                                                                                         T0010000655
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000006000000                                                                                   000000000002928000
+MWN                STIM10000066  QUANTUM LEAP FORWARD                                                                                                    T0010000666
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000380000                                                                                   000000000000024320
+MWN                STIM10000067  NEURAL DRIFT SIDEWAYS                                                                                                   T0010000677
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000720000                                                                                   000000000000432000
+MWN                STIM10000068  BINARY BEAT DROPS                                                                                                       T0010000688
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001600000                                                                                   000000000000168000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000979068                                                                                   000000000000102802
+MWN                STIM10000069  PIXEL PULSE QUICKENS                                                                                                    T0010000699
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003200000                                                                                   000000000001408000
+MWN                STIM10000070  VECTOR GROOVE LOCKS                                                                                                     T0010000700
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000008500000                                                                                   000000000006516666
+MWN                STIM10000071  ISLAND BREEZE CALLS SOFT                                                                                                T0010000711
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000290000                                                                                   000000000000110925
+MWN                STIM10000072  COASTAL CALM WATERS STILL                                                                                               T0010000722
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000650000                                                                                   000000000000175500
+WER                               ME                                                                                                                                                                                                                 SEK000000000000613499                                                                                   000000000000165644
+MWN                STIM10000073  HIGHLAND MIST ROLLS THICK                                                                                               T0010000733
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001100000                                                                                   000000000000208979
+WER                               ME                                                                                                                                                                                                                 SEK000000000000491620                                                                                   000000000000093398
+MWN                STIM10000074  RIVER DEEP RUNS STRONG                                                                                                  T0010000744
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002400000                                                                                   000000000000360000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003591582                                                                                   000000000000538737
+MWN                STIM10000075  DESERT WIND BLOWS HARD                                                                                                  T0010000755
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000005500000                                                                                   000000000002322338
+MWN                STIM10000076  STOCKHOLM BLUES SLOW                                                                                                    T0010000766
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000430000                                                                                   000000000000117533
+WER                               ME                                                                                                                                                                                                                 SEK000000000000545907                                                                                   000000000000149214
+MWN                STIM10000077  GOTHENBURG GROOVE FAST                                                                                                  T0010000777
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000960000                                                                                   000000000000550400
+WER                               ME                                                                                                                                                                                                                 SEK000000000000727557                                                                                   000000000000417132
+MWN                STIM10000078  MALMO SHUFFLE DANCE NOW                                                                                                 T0010000788
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001900000                                                                                   000000000000142500
+WER                               ME                                                                                                                                                                                                                 SEK000000000002077307                                                                                   000000000000155798
+MWN                STIM10000079  GAMLA STAN WALTZ OLD                                                                                                    T0010000799
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000004100000                                                                                   000000000002890500
+MWN                STIM10000080  SODERMALM NIGHTS DARK                                                                                                   T0010000800
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000011000000                                                                                   000000000001347500
+MWN                STIM10000081  NORRLAND DREAM FADES FAR                                                                                                T0010000811
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000102600                                                                                   000000000000068400
+WER                               ME                                                                                                                                                                                                                 SEK000000000000102459                                                                                   000000000000068306
+MWN                STIM10000082  DALARNA DANCE STEPS LIGHT                                                                                               T0010000822
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000372000                                                                                   000000000000033480
+WER                               ME                                                                                                                                                                                                                 SEK000000000000442803                                                                                   000000000000039852
+MWN                STIM10000083  SMALAND STOMP HEAVY BEAT                                                                                                T0010000833
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000900000                                                                                   000000000000783000
+MWN                STIM10000084  VASTERAS VIBE CHECK QUICK                                                                                               T0010000844
+MDR                MDMEC
+MIP                                0150010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002100000                                                                                   000000000000315000
+MWN                STIM10000085  OREBRO NIGHT LIGHTS BURN                                                                                                T0010000855
+MDR                MDMEC
+MIP                                0600010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000005000000                                                                                   000000000003200000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001992440                                                                                   000000000001275161
+MWN                STIM10000086  VAGSANG PA HAVET WIDE                                                                                                   T0010000866
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000750000                                                                                   000000000000875000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000880703                                                                                   000000000001027486
+MWN                STIM10000087  BARNVISA TILL NATTEN DEEP                                                                                               T0010000877
+MDR                MDMEC
+MIP                                0750010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001800000                                                                                   000000000001710000
+MWN                STIM10000088  FOLKVISA FRAN NORRLAND HIGH                                                                                             T0010000888
+MDR                MDMEC
+MIP                                0500010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000004200000                                                                                   000000000002800000
+MWN                STIM10000089  DANSMELODI SOMMAR BRIGHT                                                                                                T0010000899
+MDR                MDMEC
+MIP                                0333310000
+WER                               ME                                                                                                                                                                                                                 SEK000000000009500000                                                                                   000000000004538435
+WER                               ME                                                                                                                                                                                                                 SEK000000000009828620                                                                                   000000000004695426
+MWN                STIM10000090  MARSCHTAKT STOCKHOLM BOLD                                                                                               T0010000900
+MDR                MDMEC
+MIP                                0250010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000022000000                                                                                   000000000008616666
+WER                               ME                                                                                                                                                                                                                 SEK000000000022152513                                                                                   000000000008676400
+MWN                STIM10000091  SNOWFALL WALTZ QUICK PACE                                                                                               T0010000911
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000450000                                                                                   000000000000500025
+MWN                STIM10000092  THUNDERSTORM BOOGIE WILD                                                                                                T0010000922
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001100000                                                                                   000000000000777333
+WER                               ME                                                                                                                                                                                                                 SEK000000000000565469                                                                                   000000000000399598
+MWN                STIM10000093  HEATWAVE SHUFFLE JAZZ HOT                                                                                               T0010000933
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002800000                                                                                   000000000004181333
+MWN                STIM10000094  RAINBOW CHASE SUNSET FAR                                                                                                T0010000944
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000007000000                                                                                   000000000001353333
+WER                               ME                                                                                                                                                                                                                 SEK000000000009055221                                                                                   000000000001750676
+MWN                STIM10000095  FOGHORN BLUES DRIFT SLOW                                                                                                T0010000955
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000018000000                                                                                   000000000032400000
+MWN                STIM10000096  ALTA VISTA DREAMS BRIGHT                                                                                                T0010000966
+MDR                MDMEC
+MIP                                0666710000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000500000                                                                                   000000000000011111
+MWN                STIM10000097  TERRA NOVA RISING HIGH                                                                                                  T0010000977
+MDR                MDMEC
+MIP                                0400010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000001200000                                                                                   000000000000052800
+MWN                STIM10000098  AQUA MARE FLOWING DEEP                                                                                                  T0010000988
+MDR                MDMEC
+MIP                                0800010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000003000000                                                                                   000000000000400000
+MWN                STIM10000099  IGNIS FATUUS BURNS LOW                                                                                                  T0010000999
+MDR                MDMEC
+MIP                                0100010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000750000                                                                                   000000000000018750
+MWN                STIM10000100  VENTUS LEVIS WHISPERS SOFT                                                                                              T0010001000
+MDR                MDMEC
+MIP                                0900010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000002100000                                                                                   000000000000567000

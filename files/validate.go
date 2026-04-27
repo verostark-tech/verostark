@@ -14,6 +14,7 @@ var allowedExts = map[string]bool{
 	".txt":  true,
 	".csv":  true,
 	".cwr":  true,
+	".crd":  true,
 	".pdf":  true,
 	".xlsx": true,
 }
@@ -21,11 +22,12 @@ var allowedExts = map[string]bool{
 // expectedMIMEPrefix maps each allowed extension to the MIME prefix
 // that http.DetectContentType must return for the file to pass.
 // xlsx is a ZIP-based format, so its detected MIME is application/zip.
-// cwr files are plain ASCII text.
+// cwr and crd files are plain ASCII text.
 var expectedMIMEPrefix = map[string]string{
 	".txt":  "text/plain",
 	".csv":  "text/plain",
 	".cwr":  "text/plain",
+	".crd":  "text/plain",
 	".pdf":  "application/pdf",
 	".xlsx": "application/zip",
 }

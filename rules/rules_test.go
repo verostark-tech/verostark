@@ -2,117 +2,154 @@ package rules
 
 import "testing"
 
-// Reference case from CLAUDE.md:
-// 1000 SEK received vs ~333 SEK expected → CRITICAL flag.
-// gross=1000, controlled_share=1.0 → expected = 1000 × 1.0 × 0.3333 = 333.3 SEK
+// --- Canonical fixture tests (CLAUDE.md source of truth) ---
+//
+// SOMMARNATT: gross=372000 cents (3720.00 SEK), net=124000 cents (1240.00 SEK)
+//   observed = 124000/372000 = 1/3 (exact)
+//   expected = 1/3 × 10000/10000 = 1/3
+//   deviation = 0 → CLEAN
+//
+// DROMMAR: gross=102600 cents (1026.00 SEK), net=102600 cents (1026.00 SEK)
+//   observed = 102600/102600 = 1
+//   expected = 1/3 × 1 = 1/3
+//   deviation = 2/3, relDev = 2 >> 1/100000 → FLAG
+//   ratio_excess = 3 ≥ 2.5 → CRITICAL
+//   overpayment = 1026.00 - 342.00 = 684.00 SEK
 
-func TestEvaluate(t *testing.T) {
+func TestEvaluate_SOMMARNATT_Clean(t *testing.T) {
+	got, err := Evaluate(Input{
+		GrossCents:            372000,
+		NetCents:              124000,
+		ControlledNumerator:   10000,
+		ControlledDenominator: 10000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Flagged {
+		t.Errorf("SOMMARNATT: want CLEAN, got flagged (deviation=%.10f, severity=%s)",
+			got.DeviationAmount, got.Severity)
+	}
+}
+
+func TestEvaluate_DROMMAR_Critical(t *testing.T) {
+	got, err := Evaluate(Input{
+		GrossCents:            102600,
+		NetCents:              102600,
+		ControlledNumerator:   10000,
+		ControlledDenominator: 10000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Flagged {
+		t.Fatalf("DROMMAR: want CRITICAL, got CLEAN (deviation=%.10f)", got.DeviationAmount)
+	}
+	if got.Severity != SeverityCritical {
+		t.Errorf("DROMMAR: severity=%q want CRITICAL", got.Severity)
+	}
+
+	// Overpayment = received − expected = 1026.00 − 342.00 = 684.00 SEK
+	const wantOverpayment = 684.00
+	if got.DeviationAmount < wantOverpayment-0.005 || got.DeviationAmount > wantOverpayment+0.005 {
+		t.Errorf("DROMMAR: overpayment=%.2f want %.2f SEK", got.DeviationAmount, wantOverpayment)
+	}
+}
+
+// --- Severity boundary tests ---
+
+func TestEvaluate_Severity(t *testing.T) {
 	tests := []struct {
-		name     string
-		in       Input
-		wantFlag bool
-		wantSev  string
+		name        string
+		in          Input
+		wantFlagged bool
+		wantSev     string
 	}{
 		{
-			name: "CRITICAL overpayment — 1000 received vs 333 expected",
+			// ratio_excess = 3 ≥ 2.5 → CRITICAL
+			name: "CRITICAL: ratio 1/1 vs expected 1/3 (full override)",
 			in: Input{
-				Gross:                     1000,
-				Received:                  1000,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "performance",
+				GrossCents:            102600,
+				NetCents:              102600,
+				ControlledNumerator:   10000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: true,
-			wantSev:  SeverityCritical,
+			wantFlagged: true,
+			wantSev:     SeverityCritical,
 		},
 		{
-			name: "CRITICAL underpayment — received 10% of expected",
+			// observed=0.5/1=0.5, expected=1/3, ratio_excess=1.5 — boundary HIGH
+			name: "HIGH: ratio_excess exactly 1.5",
 			in: Input{
-				Gross:                     1000,
-				Received:                  33,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "mechanical",
+				GrossCents:            100,
+				NetCents:              50,
+				ControlledNumerator:   10000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: true,
-			wantSev:  SeverityCritical,
+			wantFlagged: true,
+			wantSev:     SeverityHigh,
 		},
 		{
-			name: "HIGH underpayment — received ~50% of expected",
+			// observed=0.4, expected=1/3, ratio_excess=1.2 → MEDIUM
+			name: "MEDIUM: ratio_excess 1.2",
 			in: Input{
-				Gross:                     1000,
-				Received:                  166.65,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "performance",
+				GrossCents:            100,
+				NetCents:              40,
+				ControlledNumerator:   10000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: true,
-			wantSev:  SeverityHigh,
+			wantFlagged: true,
+			wantSev:     SeverityMedium,
 		},
 		{
-			name: "no flag — deviation below 25% threshold",
+			// observed=0.36, expected=1/3, ratio_excess≈1.08 < 1.1 → POSSIBLE
+			name: "POSSIBLE: ratio_excess just under 1.1",
 			in: Input{
-				Gross:                     1000,
-				Received:                  340, // ~2% over expected 333.3
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "performance",
+				GrossCents:            10000,
+				NetCents:              3600,
+				ControlledNumerator:   10000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: false,
-			wantSev:  "",
+			wantFlagged: true,
+			wantSev:     SeverityPossible,
 		},
 		{
-			name: "no flag — exact payment",
+			// exact payment: observed = expected → CLEAN
+			name: "CLEAN: exact STIM payment",
 			in: Input{
-				Gross:                     1000,
-				Received:                  333.3,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "mechanical",
+				GrossCents:            372000,
+				NetCents:              124000,
+				ControlledNumerator:   10000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: false,
-			wantSev:  "",
+			wantFlagged: false,
+			wantSev:     "",
 		},
 		{
-			name: "no flag — zero controlled share",
+			// partial controlled share: 50%
+			// expected = 1/3 × 0.5 = 1/6
+			// observed = 12400/37200 = 1/3, ratio_excess = 2 → HIGH (1.5 ≤ 2 < 2.5)
+			name: "HIGH: 50% controlled share, ratio_excess 2",
 			in: Input{
-				Gross:                     1000,
-				Received:                  0,
-				ControlledManuscriptShare: 0,
-				RightType:                 "performance",
+				GrossCents:            37200,
+				NetCents:              12400,
+				ControlledNumerator:   5000,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: false,
-			wantSev:  "",
+			wantFlagged: true,
+			wantSev:     SeverityHigh,
 		},
 		{
-			name: "mechanical and performance evaluated independently",
+			// zero controlled share → no flag
+			name: "CLEAN: zero controlled share",
 			in: Input{
-				Gross:                     500,
-				Received:                  500,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "mechanical",
+				GrossCents:            100000,
+				NetCents:              0,
+				ControlledNumerator:   0,
+				ControlledDenominator: 10000,
 			},
-			wantFlag: true,
-			wantSev:  SeverityCritical,
-		},
-		{
-			name: "partial controlled share — 50% controlled",
-			in: Input{
-				Gross:                     1000,
-				Received:                  500,
-				ControlledManuscriptShare: 0.50,
-				RightType:                 "performance",
-				// expected = 1000 × 0.50 × 0.3333 = 166.65
-				// deviation = 500 - 166.65 = 333.35 → 200% → CRITICAL
-			},
-			wantFlag: true,
-			wantSev:  SeverityCritical,
-		},
-		{
-			name: "right type matching is case-insensitive",
-			in: Input{
-				Gross:                     1000,
-				Received:                  1000,
-				ControlledManuscriptShare: 1.0,
-				RightType:                 "Performance",
-			},
-			wantFlag: true,
-			wantSev:  SeverityCritical,
+			wantFlagged: false,
+			wantSev:     "",
 		},
 	}
 
@@ -122,9 +159,9 @@ func TestEvaluate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.Flagged != tt.wantFlag {
-				t.Errorf("Flagged=%v want %v (expected=%.4f received=%.4f deviation_pct=%.4f)",
-					got.Flagged, tt.wantFlag, got.Expected, got.Received, got.DeviationPct)
+			if got.Flagged != tt.wantFlagged {
+				t.Errorf("Flagged=%v want %v (expected=%.4f received=%.4f deviationPct=%.4f)",
+					got.Flagged, tt.wantFlagged, got.Expected, got.Received, got.DeviationPct)
 			}
 			if got.Severity != tt.wantSev {
 				t.Errorf("Severity=%q want %q", got.Severity, tt.wantSev)
@@ -133,69 +170,28 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
-// TestSyntheticStatement runs the exact values from synthetic_statement_MEC_2025Q1.csv
-// through the rules engine. Two lines must be flagged CRITICAL; three must be clean.
-//
-// BM003 has two writers in the CSV but parseSTIM aggregates them into one line
-// with net=36.70 (18.35+18.35) and the catalogue returns controlled_share=1.0 (both writers).
-func TestSyntheticStatement(t *testing.T) {
-	rows := []struct {
-		name                      string
-		gross, received           float64
-		controlledManuscriptShare float64
-		wantFlag                  bool
-		wantSev                   string
-	}{
-		// BM001 Sommarnatt: 1.0 controlled — received 15.81, expected ~16.30. ~3% gap = STIM fee. Clean.
-		{"BM001 Sommarnatt", 48.90, 15.81, 1.0, false, ""},
-		// BM002 Langtan: 0.5 controlled — received 7.19, expected ~7.41. ~3% gap = STIM fee. Clean.
-		{"BM002 Langtan", 44.47, 7.19, 0.5, false, ""},
-		// BM003 Vintervag: aggregated net=36.70, controlled=1.0, expected ~18.92. +94% overpayment.
-		{"BM003 Vintervag", 56.77, 36.70, 1.0, true, SeverityCritical},
-		// BM004 Drommar: 1.0 controlled — received 81.50, expected ~28.00. STIM key not applied.
-		{"BM004 Drommar", 84.02, 81.50, 1.0, true, SeverityCritical},
-		// BM005 Frihet: 1.0 controlled — received 6.94, expected ~7.16. ~3% gap = STIM fee. Clean.
-		{"BM005 Frihet", 21.47, 6.94, 1.0, false, ""},
-	}
+// --- Error cases ---
 
-	var flagCount int
-	for _, r := range rows {
-		t.Run(r.name, func(t *testing.T) {
-			got, err := Evaluate(Input{
-				Gross:                     r.gross,
-				Received:                  r.received,
-				ControlledManuscriptShare: r.controlledManuscriptShare,
-				RightType:                 "mechanical",
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.Flagged != r.wantFlag {
-				t.Errorf("Flagged=%v want %v (expected=%.4f received=%.4f deviation_pct=%.2f%%)",
-					got.Flagged, r.wantFlag, got.Expected, got.Received, got.DeviationPct*100)
-			}
-			if got.Severity != r.wantSev {
-				t.Errorf("Severity=%q want %q", got.Severity, r.wantSev)
-			}
-			if got.Flagged {
-				flagCount++
-			}
-		})
-	}
-
-	if flagCount != 2 {
-		t.Errorf("total flags=%d want 2", flagCount)
+func TestEvaluate_ZeroDenominator(t *testing.T) {
+	_, err := Evaluate(Input{
+		GrossCents:            100000,
+		NetCents:              33333,
+		ControlledNumerator:   10000,
+		ControlledDenominator: 0, // invalid
+	})
+	if err == nil {
+		t.Fatal("expected error for zero denominator, got nil")
 	}
 }
 
-func TestEvaluate_UnknownRightType(t *testing.T) {
+func TestEvaluate_ZeroGross(t *testing.T) {
 	_, err := Evaluate(Input{
-		Gross:                     1000,
-		Received:                  500,
-		ControlledManuscriptShare: 1.0,
-		RightType:                 "sync",
+		GrossCents:            0, // invalid
+		NetCents:              0,
+		ControlledNumerator:   10000,
+		ControlledDenominator: 10000,
 	})
 	if err == nil {
-		t.Fatal("expected error for unknown right type, got nil")
+		t.Fatal("expected error for zero gross, got nil")
 	}
 }

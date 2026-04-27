@@ -45,10 +45,10 @@ type ExplainRequest struct {
 	DeviationPct    float64 `json:"deviation_pct"` // fractional, signed (−0.25 = 25% under)
 }
 
-// ExplainResponse carries only the why-explanation stored on the detection_flags row.
-// Recommendations are generated deterministically by rules.Recommend — not by AI.
+// ExplainResponse carries the why-explanation and one suggested next step.
 type ExplainResponse struct {
 	Explanation string `json:"explanation"`
+	NextStep    string `json:"next_step"`
 }
 
 // ExplainDeviation calls the Claude API and returns a plain-English explanation
@@ -93,13 +93,27 @@ func (s *Service) ExplainDeviation(ctx context.Context, req *ExplainRequest) (*E
 	return &result, nil
 }
 
-const systemPrompt = `You are a royalty statement analyst for a Nordic music publisher.
-Your job is to explain WHY a payment deviation occurred on a STIM royalty statement.
-The expected payment is always calculated as: gross × controlled share × 1/3 (the STIM distribution key).
-A deviation means one of three things went wrong: the gross STIM reported differs from what was collected, the controlled share on record differs from what STIM holds, or STIM applied the distribution key incorrectly.
-Write in plain English. No technical jargon. A copyright administrator — not a software engineer — must understand every word.
-Do not tell the administrator what to do. Only explain why the deviation most likely occurred.
-Always respond with valid JSON only — no markdown, no code fences — with exactly one string field: "explanation".`
+const systemPrompt = `You are a royalty analysis assistant for an independent music publisher.
+
+Your job is to explain why a payment deviation occurred on a royalty statement and suggest what the publisher should investigate next.
+
+The expected payment is always calculated as: gross × controlled share × distribution key. For mechanical rights on a Nordic publisher registration the standard distribution key is one-third.
+
+A deviation means one of three things most likely occurred:
+1. A conflicting registration from another society overrode the local registration during the distribution period.
+2. The controlled share on record at the collecting society differs from what the publisher holds on file.
+3. An unusual distribution rule was applied to this work for this period.
+
+Rules for your response:
+- Write in plain English only. A copyright administrator — not an engineer — must understand every word.
+- Never name a specific collecting society as having made an error.
+- Never name ICE Cube, PRS, GEMA, or any other institution as the cause. Describe the data pattern — not the actor.
+- Say "the collecting society" or "the distribution" — never a society name.
+- Do not use words like: distribution key, org_id, algorithm, system, database. Use: payment percentage, share, amount, registration, claim.
+- Always end with one suggested next step the administrator can take immediately. Frame it as a suggestion not an instruction.
+
+Respond with valid JSON only. No markdown. No code fences.
+Exactly two string fields: "explanation" (why this most likely occurred) and "next_step" (one concrete suggested action).`
 
 func buildPrompt(req *ExplainRequest) string {
 	direction := "overpayment"
@@ -111,28 +125,31 @@ func buildPrompt(req *ExplainRequest) string {
 		absPct = -absPct
 	}
 
-	return fmt.Sprintf(`A %s was detected on this STIM royalty line:
+	return fmt.Sprintf(`A %s was detected on this royalty statement line:
 
-Work:             %s (ISWC: %s)
-Period:           %s
-Right type:       %s
-Gross collected:  %.2f SEK
-Controlled share: %.0f%%
-Expected payment: %.2f SEK  (= %.2f × %.0f%% × 1/3)
-Received payment: %.2f SEK
-Difference:       %.2f SEK (%.1f%%)
-Severity:         %s
+Work: %s (ISWC: %s)
+Period: %s
+Right type: %s
 
-Explain in 2–3 sentences WHY this deviation most likely occurred.
-Reason through which of the three inputs — gross, controlled share, or the distribution key — is most likely wrong, and what that means in practice for this work.
-Respond with valid JSON only: {"explanation": "..."}`,
+Gross collected: %.2f SEK
+Publisher controlled share: %.0f%%
+Expected payment: %.2f × %.0f%% × 33.33%% = %.2f SEK
+Actual payment received: %.2f SEK
+Difference: %.2f SEK (%.1f%% above expected)
+Severity: %s
+
+Explain in 2 to 3 sentences why this deviation most likely occurred. Reason through which of the three inputs — the gross amount collected, the controlled share, or the payment percentage applied — is most likely the cause.
+
+Then provide one concrete suggested next step the administrator can take to investigate or resolve this.
+
+Respond with valid JSON only: {"explanation": "...", "next_step": "..."}`,
 		direction,
 		req.WorkTitle, req.ISWC,
 		req.Period,
 		req.RightType,
 		req.GrossSEK,
 		req.ControlledShare*100,
-		req.ExpectedSEK, req.GrossSEK, req.ControlledShare*100,
+		req.GrossSEK, req.ControlledShare*100, req.ExpectedSEK,
 		req.ReceivedSEK,
 		req.DeviationSEK, absPct*100,
 		req.Severity,

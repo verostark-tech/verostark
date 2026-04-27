@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Verostark — CRD Pipeline Test</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    background: #0f1117;
+    color: #e1e4e8;
+    min-height: 100vh;
+    padding: 32px 24px;
+  }
+
+  h1 { font-size: 18px; font-weight: 600; color: #f0f6fc; letter-spacing: -0.3px; }
+  h2 { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+  p  { font-size: 13px; color: #8b949e; line-height: 1.5; }
+
+  .container { max-width: 760px; margin: 0 auto; }
+
+  .header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 32px; padding-bottom: 20px;
+    border-bottom: 1px solid #21262d;
+  }
+  .header .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+
+  /* Config panel */
+  .config {
+    background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+    padding: 20px; margin-bottom: 24px;
+  }
+  .config-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 180px; }
+  .field label { font-size: 12px; color: #8b949e; }
+  .field input {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #e1e4e8; padding: 8px 10px; font-size: 13px; font-family: monospace;
+    outline: none; width: 100%;
+  }
+  .field input:focus { border-color: #388bfd; }
+
+  /* Steps */
+  .steps { display: flex; flex-direction: column; gap: 16px; }
+
+  .step {
+    background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+    overflow: hidden; transition: opacity 0.2s;
+  }
+  .step.locked { opacity: 0.45; pointer-events: none; }
+  .step.done { border-color: #238636; }
+
+  .step-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px; border-bottom: 1px solid #21262d;
+  }
+  .step-num {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #21262d; color: #8b949e;
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step.done .step-num { background: #238636; color: #fff; }
+  .step-title { font-size: 14px; font-weight: 600; color: #f0f6fc; }
+  .step-subtitle { font-size: 12px; color: #8b949e; margin-left: auto; }
+
+  .step-body { padding: 20px; }
+
+  .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+
+  /* Buttons */
+  button {
+    border: none; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 500; padding: 8px 16px;
+    transition: opacity 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary   { background: #238636; color: #fff; }
+  .btn-primary:hover:not(:disabled)   { background: #2ea043; }
+  .btn-secondary { background: #21262d; color: #e1e4e8; border: 1px solid #30363d; }
+  .btn-secondary:hover:not(:disabled) { background: #30363d; }
+  .btn-danger    { background: #b91c1c; color: #fff; }
+  .btn-danger:hover:not(:disabled)    { background: #dc2626; }
+
+  /* File drop */
+  .dropzone {
+    border: 2px dashed #30363d; border-radius: 8px;
+    padding: 32px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 12px;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: #388bfd; background: #0d1117; }
+  .dropzone input[type=file] { display: none; }
+  .dropzone p { font-size: 13px; color: #8b949e; margin-top: 6px; }
+  .dropzone .icon { font-size: 28px; margin-bottom: 8px; }
+
+  /* Result cards */
+  .result {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+    padding: 12px 14px; margin-top: 12px; font-family: monospace; font-size: 12px;
+  }
+  .result.ok   { border-left: 3px solid #3fb950; }
+  .result.err  { border-left: 3px solid #f85149; color: #f85149; }
+  .result.info { border-left: 3px solid #388bfd; }
+
+  /* Flag cards */
+  .flag-card {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+    padding: 16px; margin-top: 12px;
+  }
+  .flag-card .flag-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .flag-card .work-title  { font-size: 15px; font-weight: 600; color: #f0f6fc; }
+  .flag-card .iswc        { font-size: 12px; color: #8b949e; font-family: monospace; }
+
+  .badge {
+    display: inline-block; border-radius: 4px;
+    padding: 2px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; flex-shrink: 0;
+  }
+  .badge.CRITICAL { background: #6e1010; color: #fca5a5; }
+  .badge.HIGH     { background: #78350f; color: #fcd34d; }
+  .badge.MEDIUM   { background: #1e3a5f; color: #93c5fd; }
+  .badge.POSSIBLE { background: #1a2c1a; color: #86efac; }
+
+  .flag-amounts {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin-bottom: 12px;
+  }
+  .amount-box { background: #161b22; border-radius: 6px; padding: 10px 12px; }
+  .amount-box .label { font-size: 11px; color: #8b949e; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .amount-box .value { font-size: 16px; font-weight: 600; color: #f0f6fc; font-family: monospace; }
+  .amount-box .value.over  { color: #f85149; }
+  .amount-box .value.under { color: #3fb950; }
+
+  .explanation {
+    font-size: 13px; color: #c9d1d9; line-height: 1.6;
+    background: #161b22; border-radius: 6px; padding: 12px;
+    border-left: 3px solid #8b949e;
+  }
+
+  .clean-card {
+    background: #0d1117; border: 1px solid #238636; border-radius: 8px;
+    padding: 14px 16px; display: flex; align-items: center; gap: 10px;
+    margin-top: 12px;
+  }
+  .clean-card .tick { color: #3fb950; font-size: 18px; }
+
+  details { margin-top: 8px; }
+  summary { font-size: 12px; color: #8b949e; cursor: pointer; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▶ "; }
+  details[open] summary::before { content: "▼ "; }
+  pre { background: #0d1117; border-radius: 6px; padding: 12px; font-size: 11px; color: #8b949e; overflow-x: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #3fb950; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .divider { height: 1px; background: #21262d; margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="dot"></div>
+    <h1>Verostark — CRD Pipeline Test</h1>
+  </div>
+
+  <!-- Config -->
+  <div class="config">
+    <h2>Configuration</h2>
+    <div class="config-row" style="margin-top:12px">
+      <div class="field">
+        <label>API Base URL</label>
+        <input id="baseUrl" type="text" value="http://localhost:4000" placeholder="http://localhost:4000">
+      </div>
+      <div class="field" style="flex:2">
+        <label>Bearer Token (Clerk session JWT)</label>
+        <input id="token" type="password" placeholder="eyJhbGci...">
+      </div>
+    </div>
+  </div>
+
+  <div class="steps">
+
+    <!-- Step 1: Upload -->
+    <div class="step" id="step1">
+      <div class="step-header">
+        <div class="step-num">1</div>
+        <div>
+          <div class="step-title">Upload CRD File</div>
+        </div>
+        <span class="step-subtitle">POST /files/upload</span>
+      </div>
+      <div class="step-body">
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".crd,.txt">
+          <div class="icon">📄</div>
+          <strong>Drop a .crd file here or click to browse</strong>
+          <p id="dropLabel">No file selected</p>
+        </label>
+        <div class="row">
+          <button class="btn-secondary" onclick="generateTestCRD()">Generate test CRD</button>
+          <button class="btn-primary" id="btnUpload" onclick="doUpload()">Upload</button>
+        </div>
+        <div id="uploadResult"></div>
+      </div>
+    </div>
+
+    <!-- Step 2: Ingest -->
+    <div class="step locked" id="step2">
+      <div class="step-header">
+        <div class="step-num">2</div>
+        <div>
+          <div class="step-title">Create Statement</div>
+        </div>
+        <span class="step-subtitle">POST /api/statements</span>
+      </div>
+      <div class="step-body">
+        <div class="row" style="margin-bottom:12px">
+          <div class="field">
+            <label>Period</label>
+            <input id="period" type="text" value="2025-Q1" placeholder="2025-Q1">
+          </div>
+          <button class="btn-primary" onclick="doIngest()">Create Statement</button>
+        </div>
+        <div id="ingestResult"></div>
+      </div>
+    </div>
+
+    <!-- Step 3: Detect -->
+    <div class="step locked" id="step3">
+      <div class="step-header">
+        <div class="step-num">3</div>
+        <div>
+          <div class="step-title">Run Detection</div>
+        </div>
+        <span class="step-subtitle">POST /api/statements/:id/run</span>
+      </div>
+      <div class="step-body">
+        <p style="margin-bottom:12px">Evaluates every WER line against the STIM distribution key (1/3) using exact rational arithmetic. Flags any deviation &gt; 1/100,000.</p>
+        <button class="btn-danger" onclick="doDetect()">Run Detection</button>
+        <div id="detectResult"></div>
+      </div>
+    </div>
+
+    <!-- Step 4: Results -->
+    <div class="step locked" id="step4">
+      <div class="step-header">
+        <div class="step-num">4</div>
+        <div>
+          <div class="step-title">Deviations &amp; Explanations</div>
+        </div>
+        <span class="step-subtitle">GET /api/deviations</span>
+      </div>
+      <div class="step-body">
+        <button class="btn-secondary" onclick="doListDeviations()">Refresh Results</button>
+        <div id="deviationsResult"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let uploadedKey      = null;
+let uploadedFilename = null;
+let statementId      = null;
+let testFileBlob     = null;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function base()  { return document.getElementById('baseUrl').value.replace(/\/$/, ''); }
+function token() { return document.getElementById('token').value.trim(); }
+
+function headers(extra = {}) {
+  return { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json', ...extra };
+}
+
+function unlock(id) {
+  document.getElementById(id).classList.remove('locked');
+}
+function markDone(id) {
+  document.getElementById(id).classList.add('done');
+  document.getElementById(id).querySelector('.step-num').textContent = '✓';
+}
+
+function showResult(containerId, html) {
+  document.getElementById(containerId).innerHTML = html;
+}
+
+function resultBox(cls, text) {
+  return `<div class="result ${cls}">${text}</div>`;
+}
+
+function spinner() {
+  return '<span class="spinner"></span>';
+}
+
+function fmtSEK(n) {
+  return (n >= 0 ? '+' : '') + n.toFixed(2) + ' SEK';
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: headers() };
+  if (body !== undefined) {
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(base() + path, opts);
+  const text = await r.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { message: text }; }
+  return { ok: r.ok, status: r.status, json };
+}
+
+// ─── CRD Generator ───────────────────────────────────────────────────────────
+// Builds the canonical synthetic CRD fixture from CLAUDE.md.
+// SOMMARNATT: gross=3720.00 SEK (372000 cents), net=1240.00 SEK (124000 cents) → CLEAN
+// DROMMAR:    gross=1026.00 SEK (102600 cents), net=1026.00 SEK (102600 cents) → CRITICAL, overpayment 684.00 SEK
+
+function padR(s, n) { return String(s).padEnd(n, ' ').slice(0, n); }
+function padL(s, n) { return String(s).padStart(n, '0').slice(-n); }
+
+function buildSDN(decimals, currency) {
+  const b = new Array(122).fill(' ');
+  'SDN'.split('').forEach((c, i) => b[i] = c);
+  b[112] = String(decimals);                                    // pos 113 size 1
+  currency.split('').forEach((c, i) => b[119 + i] = c);        // pos 120 size 3
+  return b.join('');
+}
+
+function buildMWN(workRef, workTitle, iswc) {
+  const b = new Array(164).fill(' ');
+  'MWN'.split('').forEach((c, i) => b[i] = c);
+  padR(workRef,   14).split('').forEach((c, i) => b[19  + i] = c);  // pos 20  size 14
+  padR(workTitle, 60).split('').forEach((c, i) => b[33  + i] = c);  // pos 34  size 60
+  padR(iswc,      11).split('').forEach((c, i) => b[153 + i] = c);  // pos 154 size 11
+  return b.join('');
+}
+
+function buildMDR(rightCode, rightCat) {
+  const b = new Array(24).fill(' ');
+  'MDR'.split('').forEach((c, i) => b[i] = c);
+  rightCode.split('').forEach((c, i) => b[19 + i] = c);   // pos 20 size 2
+  rightCat.split('').forEach((c, i) => b[21 + i] = c);    // pos 22 size 3
+  return b.join('');
+}
+
+function buildMIP(num, den) {
+  const b = new Array(45).fill(' ');
+  'MIP'.split('').forEach((c, i) => b[i] = c);
+  padL(num, 5).split('').forEach((c, i) => b[35 + i] = c);  // pos 36 size 5
+  padL(den, 5).split('').forEach((c, i) => b[40 + i] = c);  // pos 41 size 5
+  return b.join('');
+}
+
+function buildWER(distCat, currency, grossCents, netCents) {
+  const b = new Array(367).fill(' ');
+  'WER'.split('').forEach((c, i) => b[i] = c);
+  distCat.split('').forEach((c, i)  => b[34  + i] = c);              // pos 35  size 2
+  currency.split('').forEach((c, i) => b[245 + i] = c);              // pos 246 size 3
+  padL(grossCents, 18).split('').forEach((c, i) => b[248 + i] = c); // pos 249 size 18
+  padL(netCents,   18).split('').forEach((c, i) => b[349 + i] = c); // pos 350 size 18
+  return b.join('');
+}
+
+function generateTestCRD() {
+  const lines = [
+    buildSDN(2, 'SEK'),
+    buildMWN('STIM20190442', 'SOMMARNATT', 'T1234560013'),
+    buildMDR('MD', 'MEC'),
+    buildMIP(10000, 10000),
+    buildWER('ME', 'SEK', 372000, 124000),   // 3720.00 gross / 1240.00 net → CLEAN
+    buildMWN('STIM20180331', 'DROMMAR', 'T1234560042'),
+    buildMDR('MD', 'MEC'),
+    buildMIP(10000, 10000),
+    buildWER('ME', 'SEK', 102600, 102600),   // 1026.00 gross / 1026.00 net → CRITICAL
+  ];
+  const content = lines.join('\n');
+  testFileBlob = new Blob([content], { type: 'text/plain' });
+  uploadedFilename = 'verostark_synthetic_MEC_Q1_2025.crd';
+  document.getElementById('dropLabel').textContent = uploadedFilename + ' (generated)';
+  document.getElementById('fileInput').value = '';
+  showResult('uploadResult', resultBox('info',
+    '✓ Test CRD generated in memory — SOMMARNATT (CLEAN) + DROMMAR (CRITICAL, overpayment 684.00 SEK). Click Upload to send.'
+  ));
+}
+
+// ─── File input ───────────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', function() {
+  if (this.files[0]) {
+    testFileBlob = null;
+    uploadedFilename = this.files[0].name;
+    document.getElementById('dropLabel').textContent = this.files[0].name;
+    showResult('uploadResult', '');
+  }
+});
+
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) {
+    testFileBlob = null;
+    uploadedFilename = f.name;
+    document.getElementById('dropLabel').textContent = f.name;
+    showResult('uploadResult', '');
+  }
+});
+
+// ─── Step 1: Upload ──────────────────────────────────────────────────────────
+async function doUpload() {
+  const fileInput = document.getElementById('fileInput');
+  const file = testFileBlob
+    ? new File([testFileBlob], uploadedFilename, { type: 'text/plain' })
+    : fileInput.files[0];
+
+  if (!file) {
+    showResult('uploadResult', resultBox('err', 'No file selected. Use "Generate test CRD" or pick a .crd file.'));
+    return;
+  }
+  if (!token()) {
+    showResult('uploadResult', resultBox('err', 'Enter a Bearer token in the config above.'));
+    return;
+  }
+
+  showResult('uploadResult', resultBox('info', spinner() + 'Uploading…'));
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const r = await fetch(base() + '/files/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token() },
+      body: form,
+    });
+    const json = await r.json();
+    if (!r.ok) {
+      showResult('uploadResult', resultBox('err', 'Upload failed: ' + (json.message || r.status)));
+      return;
+    }
+    uploadedKey      = json.key;
+    uploadedFilename = json.filename;
+
+    showResult('uploadResult', `
+      <div class="result ok">
+        ✓ Uploaded — <code>${json.filename}</code> · ${(json.size/1024).toFixed(1)} KB
+        <details><summary>Raw response</summary><pre>${JSON.stringify(json, null, 2)}</pre></details>
+      </div>`);
+
+    markDone('step1');
+    unlock('step2');
+  } catch (e) {
+    showResult('uploadResult', resultBox('err', 'Network error: ' + e.message));
+  }
+}
+
+// ─── Step 2: Ingest ───────────────────────────────────────────────────────────
+async function doIngest() {
+  if (!uploadedKey) {
+    showResult('ingestResult', resultBox('err', 'Upload a file first.'));
+    return;
+  }
+  const period = document.getElementById('period').value.trim();
+  if (!period) {
+    showResult('ingestResult', resultBox('err', 'Period is required.'));
+    return;
+  }
+
+  showResult('ingestResult', resultBox('info', spinner() + 'Creating statement…'));
+
+  const { ok, json } = await api('POST', '/api/statements', {
+    filename: uploadedFilename,
+    period,
+    file_key: uploadedKey,
+  });
+
+  if (!ok) {
+    showResult('ingestResult', resultBox('err', 'Error ' + (json.message || JSON.stringify(json))));
+    return;
+  }
+
+  statementId = json.id;
+  showResult('ingestResult', `
+    <div class="result ok">
+      ✓ Statement #${json.id} created — ${json.filename} · period ${json.period} · status <strong>${json.status}</strong>
+      <details><summary>Raw response</summary><pre>${JSON.stringify(json, null, 2)}</pre></details>
+    </div>`);
+
+  markDone('step2');
+  unlock('step3');
+}
+
+// ─── Step 3: Detect ───────────────────────────────────────────────────────────
+async function doDetect() {
+  if (!statementId) {
+    showResult('detectResult', resultBox('err', 'Create a statement first.'));
+    return;
+  }
+
+  showResult('detectResult', resultBox('info', spinner() + 'Running detection — this calls the Claude API for flagged lines…'));
+
+  const { ok, json } = await api('POST', `/api/statements/${statementId}/run`);
+
+  if (!ok) {
+    showResult('detectResult', resultBox('err', 'Error: ' + (json.message || JSON.stringify(json))));
+    return;
+  }
+
+  const msg = json.flag_count === 0
+    ? `✓ Detection complete — no deviations found. ${json.unmatched_count} unmatched lines.`
+    : `✓ Detection complete — <strong>${json.flag_count} deviation${json.flag_count > 1 ? 's' : ''} flagged</strong>. ${json.unmatched_count} unmatched.`;
+
+  showResult('detectResult', `
+    <div class="result ok">
+      ${msg}
+      <details><summary>Raw response</summary><pre>${JSON.stringify(json, null, 2)}</pre></details>
+    </div>`);
+
+  markDone('step3');
+  unlock('step4');
+  doListDeviations();
+}
+
+// ─── Step 4: Deviations ───────────────────────────────────────────────────────
+async function doListDeviations() {
+  showResult('deviationsResult', resultBox('info', spinner() + 'Loading deviations…'));
+
+  const path = statementId
+    ? `/api/deviations?statement_id=${statementId}`
+    : '/api/deviations';
+
+  const { ok, json } = await api('GET', path);
+
+  if (!ok) {
+    showResult('deviationsResult', resultBox('err', 'Error: ' + (json.message || JSON.stringify(json))));
+    return;
+  }
+
+  const flags = json.flags || [];
+
+  if (flags.length === 0) {
+    showResult('deviationsResult', `
+      <div class="clean-card">
+        <span class="tick">✓</span>
+        <div>
+          <strong>No deviations detected</strong>
+          <p style="margin-top:4px">All works in this statement match the expected STIM distribution (1/3 key, exact rational arithmetic).</p>
+        </div>
+      </div>`);
+    return;
+  }
+
+  // Group: flagged vs clean lines (we show flags only — unmatched shown separately)
+  let html = `<div style="margin-top:12px; font-size:12px; color:#8b949e; margin-bottom:4px">${flags.length} deviation${flags.length > 1 ? 's' : ''} found</div>`;
+
+  for (const f of flags) {
+    const dev = f.deviation_amount;
+    const devClass = dev > 0 ? 'over' : 'under';
+    const pct = (f.deviation_pct * 100).toFixed(1);
+    html += `
+    <div class="flag-card">
+      <div class="flag-header">
+        <span class="badge ${f.severity}">${f.severity}</span>
+        <span class="work-title">${f.work_title || '(unknown work)'}</span>
+        <span class="iswc">${f.iswc || ''}</span>
+      </div>
+
+      <div class="flag-amounts">
+        <div class="amount-box">
+          <div class="label">Expected</div>
+          <div class="value">${f.expected_amount.toFixed(2)} SEK</div>
+        </div>
+        <div class="amount-box">
+          <div class="label">Received</div>
+          <div class="value">${f.received_amount.toFixed(2)} SEK</div>
+        </div>
+        <div class="amount-box">
+          <div class="label">Deviation</div>
+          <div class="value ${devClass}">${fmtSEK(dev)} (${pct}%)</div>
+        </div>
+      </div>
+
+      ${f.explanation
+        ? `<div class="explanation">${f.explanation}</div>`
+        : `<div class="explanation" style="color:#8b949e;font-style:italic">No explanation available.</div>`
+      }
+
+      <details style="margin-top:10px">
+        <summary>Raw flag data</summary>
+        <pre>${JSON.stringify(f, null, 2)}</pre>
+      </details>
+    </div>`;
+  }
+
+  showResult('deviationsResult', html);
+}
+</script>
+</body>
+</html>

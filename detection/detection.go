@@ -1,20 +1,16 @@
-// Package detection orchestrates deviation analysis for a royalty statement.
-// For each statement line it evaluates the distribution key formula using the
-// controlled share already present on the line, generates an AI explanation for
-// flagged lines, and stores the results as detection_flags. No catalogue lookup
-// is required — all inputs come from the statement itself.
+// Package detection orchestrates deviation analysis for a CRD royalty statement.
+// For each statement line it evaluates the STIM distribution key formula using
+// exact rational arithmetic (via rules.Evaluate), generates an AI explanation
+// for flagged lines, and stores the results as detection_flags.
 //
-// Two additional checks run after the per-line loop:
-//   - Cross right type check: compares MEC vs PERF observed ratios for the same
-//     work. A large divergence flags a systematic misapplication of the key.
-//   - Unmatched lines report: lines that could not be evaluated (unknown right
-//     type, zero controlled share) are recorded in detection_unmatched.
+// All inputs come from the statement_lines table (populated by crd.ParseFile).
+// No catalogue lookup is required.
 package detection
 
 import (
 	"context"
 	"fmt"
-	"math"
+	"sync"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -27,13 +23,18 @@ import (
 	"encore.app/statements"
 )
 
+// aiConcurrency is the maximum number of Claude API calls in-flight at once.
+// Keeps us well within rate limits while cutting wall-clock time significantly.
+const aiConcurrency = 5
+
+// possibleExplanation is used instead of a Claude call for POSSIBLE-severity flags.
+// The deviation is small enough that it may be rounding — AI adds no value here.
+const possibleExplanation = "The payment received is slightly above the expected publisher share. The difference is small and may reflect rounding in the collecting society's distribution calculation for this period."
+const possibleNextStep = "Compare the gross amount reported in this statement against your own records for the same period. If the pattern repeats across multiple periods, consider raising it with your collecting society."
+
 var db = sqldb.NewDatabase("detection", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
 })
-
-// crossRightTypeDivergenceThreshold is the minimum absolute difference between
-// the observed MEC and PERF ratios (net/gross) that triggers a flag.
-const crossRightTypeDivergenceThreshold = 0.05
 
 // --- Domain types ---
 
@@ -53,6 +54,7 @@ type Flag struct {
 	Severity        string    `json:"severity"`
 	PatternType     string    `json:"pattern_type"`
 	Explanation     string    `json:"explanation"`
+	NextStep        string    `json:"next_step"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 }
@@ -105,28 +107,12 @@ type GetUnmatchedResponse struct {
 	Lines []UnmatchedLine `json:"lines"`
 }
 
-// rightTypeEntry collects per-line data needed for the cross right type check.
-type rightTypeEntry struct {
-	lineID          int64
-	title           string
-	ratio           float64 // net / gross — the observed distribution ratio
-	netAmt          float64
-	grossAmt        float64
-	period          string
-	controlledShare float64
-}
-
-// crossWorkData holds the MEC and PERF entries for a single work.
-type crossWorkData struct {
-	mec  *rightTypeEntry
-	perf *rightTypeEntry
-}
-
 // --- Private API ---
 
-// RunDetection evaluates every line in the given statement, flags deviations,
-// generates AI explanations, runs the cross right type check, and records
-// unmatched lines. Statement status is updated throughout.
+// RunDetection evaluates every line in the given statement using exact rational
+// arithmetic, flags deviations, generates AI explanations for flagged lines,
+// and records lines that could not be evaluated. Statement status is updated
+// throughout.
 //
 //encore:api private
 func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionResponse, error) {
@@ -167,19 +153,32 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		stmt.ID, orgID, runID,
 	)
 
-	var flagCount, unmatchedCount int
-	crossWorks := map[string]*crossWorkData{}
+	// pendingFlag holds everything needed to insert one detection_flags row.
+	type pendingFlag struct {
+		lineID      int64
+		workTitle   string
+		iswc        string
+		patternType string
+		result      rules.Result
+		aiReq       *aisvc.ExplainRequest // nil when AI is skipped (POSSIBLE severity)
+		explanation string
+		nextStep    string
+	}
 
+	var unmatchedCount int
+	var pending []pendingFlag
+
+	// ── Pass 1: evaluate every line (pure arithmetic, no I/O) ─────────────────
 	for _, line := range linesResp.Lines {
-		if line.GrossAmount == 0 {
+		if line.GrossCents == 0 {
 			continue
 		}
-		if line.RightType != "mechanical" && line.RightType != "performance" {
+		if line.RightType != "mechanical" {
 			addUnmatched(ctx, orgID, runID, line, "unknown_right_type")
 			unmatchedCount++
 			continue
 		}
-		if line.ControlledShare == 0 {
+		if line.ControlledDenominator == 0 || line.ControlledNumerator == 0 {
 			addUnmatched(ctx, orgID, runID, line, "no_controlled_share")
 			unmatchedCount++
 			continue
@@ -190,35 +189,11 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			period = stmt.Period
 		}
 
-		// --- Collect for cross right type check (keyed by ISWC when present) ---
-
-		if line.ISWC != "" {
-			entry := &rightTypeEntry{
-				lineID:          line.ID,
-				title:           line.WorkTitle,
-				ratio:           line.NetAmount / line.GrossAmount,
-				netAmt:          line.NetAmount,
-				grossAmt:        line.GrossAmount,
-				controlledShare: line.ControlledShare,
-				period:          period,
-			}
-			if _, ok := crossWorks[line.ISWC]; !ok {
-				crossWorks[line.ISWC] = &crossWorkData{}
-			}
-			if line.RightType == "mechanical" {
-				crossWorks[line.ISWC].mec = entry
-			} else {
-				crossWorks[line.ISWC].perf = entry
-			}
-		}
-
-		// --- Individual deviation check ---
-
 		result, err := rules.Evaluate(rules.Input{
-			Gross:                     line.GrossAmount,
-			Received:                  line.NetAmount,
-			ControlledManuscriptShare: line.ControlledShare,
-			RightType:                 line.RightType,
+			GrossCents:            line.GrossCents,
+			NetCents:              line.NetCents,
+			ControlledNumerator:   line.ControlledNumerator,
+			ControlledDenominator: line.ControlledDenominator,
 		})
 		if err != nil || !result.Flagged {
 			continue
@@ -229,94 +204,79 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			patternType = "underpayment"
 		}
 
-		explanation := "An explanation could not be generated at this time."
-		explain, err := aisvc.ExplainDeviation(ctx, &aisvc.ExplainRequest{
-			WorkTitle:       line.WorkTitle,
-			ISWC:            line.ISWC,
-			RightType:       line.RightType,
-			Period:          period,
-			Severity:        result.Severity,
-			GrossSEK:        line.GrossAmount,
-			ControlledShare: line.ControlledShare,
-			ExpectedSEK:     result.Expected,
-			ReceivedSEK:     result.Received,
-			DeviationSEK:    result.DeviationAmount,
-			DeviationPct:    result.DeviationPct,
-		})
-		if err == nil {
-			explanation = explain.Explanation
+		pf := pendingFlag{
+			lineID:      line.ID,
+			workTitle:   line.WorkTitle,
+			iswc:        line.ISWC,
+			patternType: patternType,
+			result:      result,
+			explanation: "An explanation could not be generated at this time.",
+			nextStep:    "",
 		}
 
-		lineID := line.ID
+		if result.Severity == rules.SeverityPossible {
+			// Small deviation — skip Claude, use static text.
+			pf.explanation = possibleExplanation
+			pf.nextStep = possibleNextStep
+		} else {
+			pf.aiReq = &aisvc.ExplainRequest{
+				WorkTitle:       line.WorkTitle,
+				ISWC:            line.ISWC,
+				RightType:       line.RightType,
+				Period:          period,
+				Severity:        result.Severity,
+				GrossSEK:        line.GrossAmount,
+				ControlledShare: line.ControlledShare,
+				ExpectedSEK:     result.Expected,
+				ReceivedSEK:     result.Received,
+				DeviationSEK:    result.DeviationAmount,
+				DeviationPct:    result.DeviationPct,
+			}
+		}
+
+		pending = append(pending, pf)
+	}
+
+	// ── Pass 2: fan out Claude calls (max aiConcurrency in-flight) ────────────
+	sem := make(chan struct{}, aiConcurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i := range pending {
+		if pending[i].aiReq == nil {
+			continue // POSSIBLE — already has static text
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			resp, err := aisvc.ExplainDeviation(ctx, pending[i].aiReq)
+			if err == nil {
+				mu.Lock()
+				pending[i].explanation = resp.Explanation
+				pending[i].nextStep = resp.NextStep
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// ── Pass 3: insert all flags (sequential DB writes) ───────────────────────
+	var flagCount int
+	for _, pf := range pending {
 		if _, insertErr := db.Exec(ctx,
 			`INSERT INTO detection_flags
 			    (org_id, detection_run_id, statement_line_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
-			     severity, pattern_type, explanation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open')`,
-			orgID, runID, lineID, line.WorkTitle, line.ISWC,
-			result.Expected, result.Received, result.DeviationAmount, result.DeviationPct,
-			result.Severity, patternType, explanation,
+			     severity, pattern_type, explanation, next_step, status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
+			orgID, runID, pf.lineID, pf.workTitle, pf.iswc,
+			pf.result.Expected, pf.result.Received, pf.result.DeviationAmount, pf.result.DeviationPct,
+			pf.result.Severity, pf.patternType, pf.explanation, pf.nextStep,
 		); insertErr != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: "could not save detection flag"}
-		}
-		flagCount++
-	}
-
-	// --- Cross right type check ---
-	//
-	// For any work where both MEC and PERF lines exist, compare their observed
-	// ratios. A significant divergence means STIM applied the key differently
-	// across right types for the same work — a separate class of error from the
-	// per-line deviation check.
-
-	for iswc, w := range crossWorks {
-		if w.mec == nil || w.perf == nil {
-			continue
-		}
-
-		divergence := math.Abs(w.mec.ratio - w.perf.ratio)
-		if divergence < crossRightTypeDivergenceThreshold {
-			continue
-		}
-
-		severity := rules.SeverityHigh
-		if divergence > 0.15 {
-			severity = rules.SeverityCritical
-		}
-
-		// Express the divergence in SEK: how much the MEC amount would change
-		// if it had matched the PERF ratio.
-		deviationSEK := (w.mec.ratio - w.perf.ratio) * w.mec.grossAmt
-		expectedSEK := w.mec.grossAmt * w.mec.controlledShare / 3.0
-
-		explanation := "An explanation could not be generated at this time."
-		explain, err := aisvc.ExplainDeviation(ctx, &aisvc.ExplainRequest{
-			WorkTitle:    w.mec.title,
-			ISWC:         iswc,
-			RightType:    "mechanical vs performance",
-			Period:       w.mec.period,
-			Severity:     severity,
-			ExpectedSEK:  expectedSEK,
-			ReceivedSEK:  w.mec.netAmt,
-			DeviationSEK: deviationSEK,
-			DeviationPct: w.mec.ratio - w.perf.ratio,
-		})
-		if err == nil {
-			explanation = explain.Explanation
-		}
-
-		if _, crossErr := db.Exec(ctx,
-			`INSERT INTO detection_flags
-			    (org_id, detection_run_id, work_title, iswc,
-			     expected_amount, received_amount, deviation_amount, deviation_pct,
-			     severity, pattern_type, explanation, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open')`,
-			orgID, runID, w.mec.title, iswc,
-			expectedSEK, w.mec.netAmt, deviationSEK, w.mec.ratio-w.perf.ratio,
-			severity, "right_type_divergence", explanation,
-		); crossErr != nil {
-			return nil, &errs.Error{Code: errs.Internal, Message: "could not save cross right type flag"}
 		}
 		flagCount++
 	}
@@ -356,12 +316,10 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
-	// Always scope to the latest detection run per statement so re-runs replace
-	// what the administrator sees rather than accumulating historical duplicates.
 	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id, f.work_id,
 	                 f.work_title, f.iswc, f.expected_amount, f.received_amount,
 	                 f.deviation_amount, f.deviation_pct, f.severity, f.pattern_type,
-	                 f.explanation, f.status, f.created_at
+	                 f.explanation, f.next_step, f.status, f.created_at
 	          FROM detection_flags f
 	          WHERE f.org_id = $1
 	            AND f.detection_run_id IN (
@@ -401,7 +359,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 		rows.Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
 			&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 			&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-			&f.Explanation, &f.Status, &f.CreatedAt)
+			&f.Explanation, &f.NextStep, &f.Status, &f.CreatedAt)
 		out = append(out, f)
 	}
 	return &ListFlagsResponse{Flags: out}, nil
@@ -419,13 +377,13 @@ func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 		`SELECT id, org_id, detection_run_id, statement_line_id, work_id,
 		        work_title, iswc, expected_amount, received_amount,
 		        deviation_amount, deviation_pct, severity, pattern_type,
-		        explanation, status, created_at
+		        explanation, next_step, status, created_at
 		 FROM detection_flags WHERE id=$1 AND org_id=$2`,
 		req.ID, orgID,
 	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
 		&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 		&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-		&f.Explanation, &f.Status, &f.CreatedAt)
+		&f.Explanation, &f.NextStep, &f.Status, &f.CreatedAt)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.NotFound, Message: "deviation not found"}
 	}
@@ -433,15 +391,13 @@ func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 }
 
 // GetUnmatched returns lines from the latest detection run for the given
-// statement that could not be matched or evaluated, so the administrator
-// knows which works to investigate or register.
+// statement that could not be evaluated.
 //
 //encore:api private
 func GetUnmatched(ctx context.Context, req *GetUnmatchedRequest) (*GetUnmatchedResponse, error) {
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
-	// Resolve the latest detection run for this statement.
 	var runID int64
 	err := db.QueryRow(ctx,
 		`SELECT id FROM detection_runs
