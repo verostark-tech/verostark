@@ -155,6 +155,88 @@ var titlePool = []string{
 	"MUTEX MIDNIGHT SLOW", "THREAD POOL SHIMMY", "GARBAGE COLLECT BLUES", "COMPILE TIME BALLAD", "LINK ERROR HYMN",
 }
 
+// internationalTitlePool contains titles with non-ASCII characters covering
+// Swedish, German, French, Norwegian, Danish, Spanish, Portuguese, Polish,
+// Czech, Finnish, and Greek scripts.
+var internationalTitlePool = []string{
+	// Swedish (å ä ö)
+	"KÄRLEKSVISA FRÅN NORR", "HÖSTMELODI I MOLL", "VÅRENS ÅTERKOMST", "BJÖRKENS SÅNG",
+	"ÅSKVÄDER ÖVER SKOGEN", "SNÖSTORM I FJÄLLEN", "ÄLVDANSENS MELODI", "NÖJETS POLSKA",
+	"SÖMNLÖS NATT I LUND", "LÄNGTAN TILL HAVET", "MÖRKA ÖDEN VÄNTAR", "LJUSETS ÄNG",
+	"ÄNGSBLOMMOR I REGN", "FÖRLORAD I SKÄRGÅRD", "NÄTTERNA ÄR LÅNGA", "ÅRETS SISTA DANS",
+	// German (ü ö ä ß)
+	"ÜBER DEN WOLKEN HOCH", "TRÄUME AM FLUSS", "MÜNCHNER NÄCHTE TIEF", "STRAßENMUSIK BERLIN",
+	"FRÜHLINGSERWACHEN JETZT", "WINTERMÄRCHEN SÜSS", "ÖSTERREICHISCHE WÄLDER", "ZÜRICH BLUES SCHÖN",
+	"KÖLN AM RHEIN SPÄT", "DÜSSELDORF GROOVES HART", "NÜRNBERG WALZER LEICHT", "STÜRMISCHE NÄCHTE",
+	"MÄRCHENHAFTE WÄLDER", "GLÜHWEIN UND SCHNEE", "BÄCHE RAUSCHEN LAUT", "TÄLER VOLLER LICHT",
+	// French (é è ê à ù ô î â û ë)
+	"L'ÎLE ENCHANTÉE LOIN", "RÊVES D'ÉTÉ CHAUD", "AU BORD DE L'EAU FROIDE", "CRÉPUSCULE À PARIS",
+	"MÉLODIE DU SOIR DOUX", "CHÂTEAU EN RUINE GRIS", "LUMIÈRE D'AOÛT CHAUDE", "CÔTE D'AZUR BLEUE",
+	"FORÊT DE CHÊNES VIEUX", "POÈME D'HIVER FROID", "BÊTE NOIRE DANSANTE", "FÊTE SOUS LA PLUIE",
+	"APRÈS LA TEMPÊTE CALME", "MÊME LES ÉTOILES PLEURENT", "NAÏVE CHANSON DOUCE", "NOËL EN PROVENCE",
+	// Norwegian / Danish (ø æ å)
+	"KJÆRLIGHETSSANG FRA FJORD", "NØKKEN DANSER VILDT", "BJØRNENS DANS TUNG",
+	"RØDE ROSER BLØMER", "SØEN I SKOVEN DYB", "ÆBLEHAVENS SANG BLØD",
+	"TÅKE OVER BERGEN GRÅ", "SÆTER VISE GAMMEL", "VØRINGSFOSSEN BRUS",
+	"GRØNNERE ENGER LANGT", "TRØNDERSANGEN STERK", "FÆDRELAND MELODI",
+	// Spanish (ñ á é í ó ú ü)
+	"CANCIÓN DE AÑORANZA", "MÚSICA DE CORAZÓN ROTO", "NIÑO DEL CIELO AZUL",
+	"BALADA PARA SOFÍA", "ESTRELLA FUGÁZ NOCHE", "JARDÍN DE LAS MEMORIAS",
+	"LLUVIA EN OTOÑO FRÍO", "SUEÑOS DEL SUR CÁLIDO", "VIENTO EN LAS LLANURAS",
+	"CAÑÓN DEL RÍO GRANDE", "AÑOS DE AMOR PERDIDO", "MONTAÑAS DE ARAGÓN",
+	// Portuguese (ã õ ç â ê ô à)
+	"CANÇÃO DAS ALMAS TRISTES", "MÚSICA SEM FIM DOCE", "CORAÇÃO PARTIDO FADO",
+	"SAUDAÇÃO AO AMANHECER", "SOLIDÃO NA CIDADE GRANDE", "EMOÇÃO DO ATLÂNTICO",
+	"CANÇÃO DA MADRUGADA", "MEMÓRIAS DA INFÂNCIA BOA", "BÊNÇÃO DA CHUVA FINA",
+	"NAÇÃO DE NAVEGADORES", "REVELAÇÃO DO OCEANO", "TRADIÇÃO PORTUGUESA",
+	// Polish (ł ó ą ę ź ż ś ć ń)
+	"ŁĄKA W DESZCZU MOCNYM", "GÓRY O ŚWICIE JASNYM", "RZEKA PŁYNIE WOLNO",
+	"SERCE ŻĄDA MIŁOŚCI", "ŹRÓDŁO CZYSTEJ WODY", "BÓL I NADZIEJA WIECZNA",
+	"WIOSNA NAD WISŁĄ CIEPŁA", "NĘDZA I RADOŚĆ RAZEM", "ŚPIEW ŻURAWI WYSOKO",
+	// Czech / Slovak (ě š č ř ž ů á é í ó ú ý)
+	"ŘEKA VLTAVA ŠUMÍ TIŠE", "ČESKÁ PÍSEŇ STARÁ", "ŽLUTÉ LISTY PADAJÍ",
+	"DUŠIČKOVÝ ČAS PŘICHÁZÍ", "SNĚHOBÍLÉ VÁNOCE TICHÉ", "ŠUMAVSKÝ LES VONÍ",
+	"SLOVENSKÁ ZIMA STUDENÁ", "ĽUDOVÁ PIESEŇ KRÁSNA", "HORSKÉ POTOKY ČISTÉ",
+	// Finnish (ä ö)
+	"JÄRVIEN LAULU KAUNIS", "YÖLLINEN TÄHTIÄ TÄYNNÄ", "METSÄN ÄÄNESSÄ SYVÄ",
+	"TALVIYÖ PAKKASEN ALLA", "KEVÄTAURINKO LÄMMITTÄÄ", "KESÄYÖN HAAVE PITKÄ",
+	// Greek (α β γ δ — transliterated uppercase)
+	"ΑΓΑΠΗ ΚΑΙ ΘΛΙΨΗ ΒΑΘΙΑ", "ΜΟΥΣΙΚΗ ΤΗΣ ΘΑΛΑΣΣΑΣ", "ΝΥΧΤΑ ΣΤΗΝ ΑΘΗΝΑ ΖΕΣΤΗ",
+	"ΕΛΛΗΝΙΚΟ ΤΡΑΓΟΥΔΙ ΠΑΛΙΟ", "ΑΣΤΕΡΙΑ ΤΟΥ ΑΙΓΑΙΟΥ", "ΧΟΡΟΣ ΣΤΗΝ ΠΛΑΤΕΙΑ",
+	// Italian (à è é ì ò ù)
+	"CANZONE SENZA PAROLE", "SERENATA SOTTO LA LUNA", "LACRIME DI GIOIA VERA",
+	"NOTTE BLU DI NAPOLI", "VENTO DEL SUD CALDO", "PIOGGIA D'APRILE FRESCA",
+	// Turkish (ç ş ğ ü ö ı)
+	"İSTANBUL GECESİ SERIN", "BOĞAZ'DA SABAH VAKTI", "TÜRKÜ SÖYLE GÖNLüm",
+	// Japanese (romaji — parseable as ASCII bytes)
+	"SAKURA NO KISETSU UTA", "TSUKI NO HIKARI SHIZUKA", "YORU NO KAZE NAGARE",
+	// Arabic (transliterated)
+	"LAYLA WA MAJNUN QADIM", "MAQAM AL SABAH JADID", "UGHNİYA MIN AL SHARQ",
+	// Hindi (transliterated)
+	"RAAG BHAIRAVI PRABHAT", "THUMRI OF THE RAIN GOD", "BANDISH IN YAMAN KALYAN",
+}
+
+// extendedGrossPool spans from 1 SEK (100 cents) to 1 000 000 SEK (100 000 000 cents).
+var extendedGrossPool = []int64{
+	// Very small: 1–50 SEK
+	100, 250, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
+	// Small: 50–500 SEK
+	5500, 6000, 7000, 7500, 8500, 10000, 12000, 15000, 18000, 20000,
+	25000, 30000, 35000, 40000, 45000,
+	// Medium: 500–22 000 SEK (existing pool)
+	50000, 75000, 100000, 150000, 200000, 280000, 372000, 500000,
+	650000, 900000, 1200000, 1600000, 2100000,
+	// Large: 22 000–220 000 SEK
+	2800000, 3500000, 4500000, 5500000, 7000000, 9000000, 11000000,
+	15000000, 22000000,
+	// Very large: 220 000–1 000 000 SEK
+	30000000, 40000000, 55000000, 70000000, 85000000, 100000000,
+}
+
+// noiseRecords are CRD record types that the parser must silently skip.
+// They appear between and inside MWN blocks to stress-test the catch-all rule.
+var noiseRecords = []string{"ADJ", "FEO", "WBI", "WUI", "SIN", "SID"}
+
 // ── Work types ────────────────────────────────────────────────────────────────
 
 type event struct{ gross, net int64 }
@@ -456,6 +538,183 @@ func writeFile(cfg fileConfig) {
 	fmt.Printf("%-52s  %3d works  %3d WER lines\n", path, len(works), werCount)
 }
 
+// ── 1500-work stress file ─────────────────────────────────────────────────────
+
+// writeStress1500 generates verostark_stress_1500_works.crd.
+//
+// 1500 works, full deviation spread, extended gross range (1 SEK–1 000 000 SEK),
+// international titles (Swedish, German, French, Norwegian, Danish, Spanish,
+// Portuguese, Polish, Czech, Finnish, Greek, Italian, Turkish, Japanese,
+// Arabic, Hindi), and all 7 noise record types scattered throughout:
+//
+//   Between blocks : ADJ FEO WBI WUI SIN SID  (silently skipped)
+//   Inside blocks  : ICC                       (between MIP and WER)
+func writeStress1500() {
+	const seed = int64(1500)
+	rng := rand.New(rand.NewSource(seed))
+
+	// Combined title pool: ASCII pool + international pool
+	allTitles := append(titlePool, internationalTitlePool...)
+	poolSize := len(allTitles)
+
+	// Shuffle once with the seed.
+	titleIdx := make([]int, poolSize)
+	for i := range titleIdx {
+		titleIdx[i] = i
+	}
+	rng.Shuffle(poolSize, func(i, j int) { titleIdx[i], titleIdx[j] = titleIdx[j], titleIdx[i] })
+
+	seq := 0
+	newWork := func(num, den int64, evs []event) work {
+		w := work{
+			ref:    fmt.Sprintf("STIM500%07d", 1000000+seq+1),
+			title:  allTitles[titleIdx[seq%poolSize]],
+			iswc:   fmt.Sprintf("T%09d%d", 5000000+seq+1, (seq+1)%10),
+			num:    num,
+			den:    den,
+			events: evs,
+		}
+		seq++
+		return w
+	}
+
+	pool := extendedGrossPool
+	works := make([]work, 0, 1500)
+
+	// CLEAN — 400
+	for i := 0; i < 400; i++ {
+		c := cleanCases[i%len(cleanCases)]
+		gross, num, den := c[0], c[1], c[2]
+		scales := []int64{1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 300, 1000}
+		gross *= scales[rng.Intn(len(scales))]
+		works = append(works, newWork(num, den, []event{{gross, cleanNet(gross, num, den)}}))
+	}
+	// POSSIBLE (ratio_excess 1.001–1.099) — 200
+	for i := 0; i < 200; i++ {
+		s := shares[rng.Intn(len(shares))]
+		num, den := s[0], s[1]
+		gross := pool[rng.Intn(len(pool))]
+		ratio := 1.001 + rng.Float64()*0.098
+		net := devNet(gross, num, den, ratio)
+		evs := []event{{gross, net}}
+		if rng.Float64() < 0.30 {
+			g2 := pool[rng.Intn(len(pool))]
+			evs = append(evs, event{g2, devNet(g2, num, den, ratio)})
+		}
+		works = append(works, newWork(num, den, evs))
+	}
+	// MEDIUM (ratio_excess 1.1–1.499) — 250
+	for i := 0; i < 250; i++ {
+		s := shares[rng.Intn(len(shares))]
+		num, den := s[0], s[1]
+		gross := pool[rng.Intn(len(pool))]
+		ratio := 1.1 + rng.Float64()*0.399
+		net := devNet(gross, num, den, ratio)
+		evs := []event{{gross, net}}
+		if rng.Float64() < 0.40 {
+			g2 := pool[rng.Intn(len(pool))]
+			evs = append(evs, event{g2, devNet(g2, num, den, ratio)})
+		}
+		works = append(works, newWork(num, den, evs))
+	}
+	// HIGH (ratio_excess 1.5–2.499) — 250
+	for i := 0; i < 250; i++ {
+		s := shares[rng.Intn(len(shares))]
+		num, den := s[0], s[1]
+		gross := pool[rng.Intn(len(pool))]
+		ratio := 1.5 + rng.Float64()*0.999
+		net := devNet(gross, num, den, ratio)
+		evs := []event{{gross, net}}
+		if rng.Float64() < 0.35 {
+			g2 := pool[rng.Intn(len(pool))]
+			evs = append(evs, event{g2, devNet(g2, num, den, ratio)})
+		}
+		works = append(works, newWork(num, den, evs))
+	}
+	// CRITICAL (ratio_excess ≥ 2.5) — 250
+	for i := 0; i < 250; i++ {
+		s := shares[rng.Intn(len(shares))]
+		num, den := s[0], s[1]
+		gross := pool[rng.Intn(len(pool))]
+		ratio := 2.5 + rng.Float64()*3.5
+		net := devNet(gross, num, den, ratio)
+		evs := []event{{gross, net}}
+		if rng.Float64() < 0.50 {
+			g2 := pool[rng.Intn(len(pool))]
+			evs = append(evs, event{g2, devNet(g2, num, den, ratio)})
+		}
+		works = append(works, newWork(num, den, evs))
+	}
+	// UNDERPAYMENT (ratio_excess 0.05–0.95) — 150
+	for i := 0; i < 150; i++ {
+		s := shares[rng.Intn(len(shares))]
+		num, den := s[0], s[1]
+		gross := pool[rng.Intn(len(pool))]
+		ratio := 0.05 + rng.Float64()*0.90
+		net := devNet(gross, num, den, ratio)
+		evs := []event{{gross, net}}
+		if rng.Float64() < 0.40 {
+			g2 := pool[rng.Intn(len(pool))]
+			evs = append(evs, event{g2, devNet(g2, num, den, ratio)})
+		}
+		works = append(works, newWork(num, den, evs))
+	}
+
+	// Shuffle works so deviations are distributed throughout, not clustered.
+	rng.Shuffle(len(works), func(i, j int) { works[i], works[j] = works[j], works[i] })
+
+	// ── Write file ────────────────────────────────────────────────────────────
+	var sb strings.Builder
+	sb.WriteString(sdnLineWithPeriod("20250101", "20250331") + "\n")
+
+	werCount := 0
+	for i, w := range works {
+		// Between-block noise: scatter all 6 inter-block record types.
+		// Each fires at a different prime-spaced interval to avoid overlap.
+		if i > 0 && i%97 == 0 {
+			sb.WriteString(rawRecord("ADJ") + "\n")
+		}
+		if i > 0 && i%149 == 0 {
+			sb.WriteString(rawRecord("FEO") + "\n")
+		}
+		if i > 0 && i%83 == 0 {
+			sb.WriteString(rawRecord("WBI") + "\n")
+		}
+		if i > 0 && i%113 == 0 {
+			sb.WriteString(rawRecord("WUI") + "\n")
+		}
+		if i > 0 && i%67 == 0 {
+			sb.WriteString(rawRecord("SIN") + "\n")
+		}
+		if i > 0 && i%131 == 0 {
+			sb.WriteString(rawRecord("SID") + "\n")
+		}
+
+		sb.WriteString(mwnLine(w.ref, w.title, w.iswc) + "\n")
+		sb.WriteString(mdrLine() + "\n")
+		sb.WriteString(mipLine(w.num, w.den) + "\n")
+
+		// Inside-block noise: ICC between MIP and WER, every ~73 works.
+		if i%73 == 0 {
+			sb.WriteString(rawRecord("ICC") + "\n")
+		}
+
+		for _, e := range w.events {
+			sb.WriteString(werLine(e.gross, e.net) + "\n")
+			werCount++
+		}
+	}
+
+	path := "testdata/verostark_stress_1500_works.crd"
+	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "write %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%-52s 1500 works %4d WER lines\n", path, werCount)
+	fmt.Printf("  CLEAN:400  POSSIBLE:200  MEDIUM:250  HIGH:250  CRITICAL:250  UNDERPAY:150\n")
+	fmt.Printf("  Noise records — ADJ:~15  FEO:~10  WBI:~18  WUI:~13  SIN:~22  SID:~11  ICC:~21\n\n")
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 func main() {
@@ -506,4 +765,5 @@ func main() {
 			cfg.clean, cfg.possible, cfg.medium, cfg.high, cfg.critical, cfg.underpay)
 	}
 	writeEdgeCases()
+	writeStress1500()
 }
