@@ -95,9 +95,19 @@ func GetUnmatched(ctx context.Context, id int64) (*detectionsvc.GetUnmatchedResp
 // GetDetectionProgress returns the current phase and counts for a detection run.
 // Poll every ~500 ms while phase is not "done" or "failed".
 //
-// Phases: reading | identifying | loading_key | checking_ratios | explaining | done | failed
+// Phases: reading | identifying | loading_key | checking_ratios | done | failed
 //
 //encore:api auth method=GET path=/api/statements/:id/detection-progress
 func GetDetectionProgress(ctx context.Context, id int64) (*detectionsvc.ProgressResponse, error) {
 	return detectionsvc.GetProgress(ctx, &detectionsvc.GetProgressRequest{StatementID: id})
+}
+
+// GenerateExplanation generates the AI explanation and next step for a single
+// deviation flag. Idempotent — returns cached text if already generated.
+// Never returns an error on AI failure; returns the flag with a fallback message
+// and explanation_status="failed" so the frontend can show a retry button.
+//
+//encore:api auth method=POST path=/api/deviations/:id/explain
+func GenerateExplanation(ctx context.Context, id int64) (*detectionsvc.Flag, error) {
+	return detectionsvc.GenerateExplanation(ctx, &detectionsvc.GenerateExplanationRequest{FlagID: id})
 }

@@ -1,7 +1,8 @@
 // Package detection orchestrates deviation analysis for a CRD royalty statement.
 // For each statement line it evaluates the STIM distribution key formula using
-// exact rational arithmetic (via rules.Evaluate), generates an AI explanation
-// for flagged lines, and stores the results as detection_flags.
+// exact rational arithmetic (via rules.Evaluate), flags deviations, and stores
+// the results as detection_flags. AI explanations are generated lazily — only
+// when the user opens a specific flag.
 //
 // All inputs come from the statement_lines table (populated by crd.ParseFile).
 // No catalogue lookup is required.
@@ -10,8 +11,6 @@ package detection
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	encoreauth "encore.dev/beta/auth"
@@ -24,12 +23,8 @@ import (
 	"encore.app/statements"
 )
 
-// aiConcurrency is the maximum number of Claude API calls in-flight at once.
-// Keeps us well within rate limits while cutting wall-clock time significantly.
-const aiConcurrency = 5
-
-// possibleExplanation is used instead of a Claude call for POSSIBLE-severity flags.
-// The deviation is small enough that it may be rounding — AI adds no value here.
+// possibleExplanation / possibleNextStep replace Claude for POSSIBLE-severity flags.
+// The deviation is small enough to be rounding — AI adds no value here.
 const possibleExplanation = "The payment received is slightly above the expected publisher share. The difference is small and may reflect rounding in the collecting society's distribution calculation for this period."
 const possibleNextStep = "Compare the gross amount reported in this statement against your own records for the same period. If the pattern repeats across multiple periods, consider raising it with your collecting society."
 
@@ -41,23 +36,28 @@ var db = sqldb.NewDatabase("detection", sqldb.DatabaseConfig{
 
 // Flag is a detected deviation between what was paid and what was expected.
 type Flag struct {
-	ID              int64     `json:"id"`
-	OrgID           string    `json:"org_id"`
-	DetectionRunID  int64     `json:"detection_run_id"`
-	StatementLineID *int64    `json:"statement_line_id,omitempty"`
-	WorkID          *int64    `json:"work_id,omitempty"`
-	WorkTitle       string    `json:"work_title"`
-	ISWC            string    `json:"iswc"`
-	ExpectedAmount  float64   `json:"expected_amount"`
-	ReceivedAmount  float64   `json:"received_amount"`
-	DeviationAmount float64   `json:"deviation_amount"`
-	DeviationPct    float64   `json:"deviation_pct"`
-	Severity        string    `json:"severity"`
-	PatternType     string    `json:"pattern_type"`
-	Explanation     string    `json:"explanation"`
-	NextStep        string    `json:"next_step"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID                int64     `json:"id"`
+	OrgID             string    `json:"org_id"`
+	DetectionRunID    int64     `json:"detection_run_id"`
+	StatementLineID   *int64    `json:"statement_line_id,omitempty"`
+	WorkID            *int64    `json:"work_id,omitempty"`
+	WorkTitle         string    `json:"work_title"`
+	ISWC              string    `json:"iswc"`
+	ExpectedAmount    float64   `json:"expected_amount"`
+	ReceivedAmount    float64   `json:"received_amount"`
+	DeviationAmount   float64   `json:"deviation_amount"`
+	DeviationPct      float64   `json:"deviation_pct"`
+	Severity          string    `json:"severity"`
+	PatternType       string    `json:"pattern_type"`
+	Explanation       string    `json:"explanation"`
+	NextStep          string    `json:"next_step"`
+	ExplanationStatus string    `json:"explanation_status"` // pending | generated | failed
+	RightType         string    `json:"right_type"`
+	Period            string    `json:"period"`
+	GrossAmount       float64   `json:"gross_amount"`
+	ControlledShare   float64   `json:"controlled_share"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // UnmatchedLine is a statement line that could not be evaluated.
@@ -109,7 +109,7 @@ type GetUnmatchedResponse struct {
 }
 
 // ProgressResponse is the payload polled by the frontend every ~500 ms.
-// Phase values: reading | identifying | loading_key | checking_ratios | explaining | done | failed
+// Phase values: reading | identifying | loading_key | checking_ratios | done | failed
 type ProgressResponse struct {
 	Phase           string  `json:"phase"`
 	WorksTotal      int     `json:"works_total"`
@@ -122,6 +122,10 @@ type ProgressResponse struct {
 
 type GetProgressRequest struct {
 	StatementID int64 `json:"statement_id"`
+}
+
+type GenerateExplanationRequest struct {
+	FlagID int64 `json:"flag_id"`
 }
 
 const distributionKey = "Standard 1/3 mechanical share · Sweden"
@@ -167,9 +171,9 @@ func GetProgress(ctx context.Context, req *GetProgressRequest) (*ProgressRespons
 // --- Private API ---
 
 // RunDetection evaluates every line in the given statement using exact rational
-// arithmetic, flags deviations, generates AI explanations for flagged lines,
-// and records lines that could not be evaluated. Statement status is updated
-// throughout.
+// arithmetic, flags deviations with explanation_status='pending', and records
+// lines that could not be evaluated. No AI calls are made here — explanations
+// are generated lazily when the user opens a specific flag.
 //
 //encore:api private
 func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionResponse, error) {
@@ -213,7 +217,7 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		Phase: "identifying", WorksTotal: totalLines, DistributionKey: distributionKey,
 	})
 
-	// Delete flags from any previous runs for this statement so re-runs replace, not accumulate.
+	// Delete flags from any previous runs so re-runs replace, not accumulate.
 	db.Exec(ctx,
 		`DELETE FROM detection_flags
 		 WHERE detection_run_id IN (
@@ -227,28 +231,16 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		Phase: "loading_key", WorksTotal: totalLines, DistributionKey: distributionKey,
 	})
 
-	// pendingFlag holds everything needed to insert one detection_flags row.
-	type pendingFlag struct {
-		lineID      int64
-		workTitle   string
-		iswc        string
-		patternType string
-		result      rules.Result
-		aiReq       *aisvc.ExplainRequest // nil when AI is skipped (POSSIBLE severity)
-		explanation string
-		nextStep    string
-	}
+	var flagCount, unmatchedCount int
 
-	var unmatchedCount int
-	var pending []pendingFlag
-
-	// ── Pass 1: evaluate every line (pure arithmetic, no I/O) ─────────────────
+	// Single pass: evaluate each line and insert flags immediately.
 	for i, line := range linesResp.Lines {
 		if i%5 == 0 {
 			setProgress(ctx, stmt.ID, orgID, ProgressResponse{
 				Phase:           "checking_ratios",
 				WorksTotal:      totalLines,
 				WorksChecked:    i,
+				FlagCount:       flagCount,
 				UnmatchedCount:  unmatchedCount,
 				DistributionKey: distributionKey,
 			})
@@ -287,102 +279,28 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 			patternType = "underpayment"
 		}
 
-		pf := pendingFlag{
-			lineID:      line.ID,
-			workTitle:   line.WorkTitle,
-			iswc:        line.ISWC,
-			patternType: patternType,
-			result:      result,
-			explanation: "An explanation could not be generated at this time.",
-			nextStep:    "",
-		}
-
+		// POSSIBLE flags get static text immediately; all others stay pending.
+		explanationStatus := "pending"
+		explanation := ""
+		nextStep := ""
 		if result.Severity == rules.SeverityPossible {
-			// Small deviation — skip Claude, use static text.
-			pf.explanation = possibleExplanation
-			pf.nextStep = possibleNextStep
-		} else {
-			pf.aiReq = &aisvc.ExplainRequest{
-				WorkTitle:       line.WorkTitle,
-				ISWC:            line.ISWC,
-				RightType:       line.RightType,
-				Period:          period,
-				Severity:        result.Severity,
-				GrossSEK:        line.GrossAmount,
-				ControlledShare: line.ControlledShare,
-				ExpectedSEK:     result.Expected,
-				ReceivedSEK:     result.Received,
-				DeviationSEK:    result.DeviationAmount,
-				DeviationPct:    result.DeviationPct,
-			}
+			explanationStatus = "generated"
+			explanation = possibleExplanation
+			nextStep = possibleNextStep
 		}
 
-		pending = append(pending, pf)
-	}
-
-	// ── Pass 2: fan out Claude calls (max aiConcurrency in-flight) ────────────
-	var aiCallCount int
-	for _, pf := range pending {
-		if pf.aiReq != nil {
-			aiCallCount++
-		}
-	}
-	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
-		Phase:           "explaining",
-		WorksTotal:      aiCallCount,
-		WorksChecked:    0,
-		FlagCount:       0,
-		UnmatchedCount:  unmatchedCount,
-		DistributionKey: distributionKey,
-	})
-
-	sem := make(chan struct{}, aiConcurrency)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var explained int32 // atomic counter for progress updates
-
-	for i := range pending {
-		if pending[i].aiReq == nil {
-			continue // POSSIBLE — already has static text
-		}
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			resp, err := aisvc.ExplainDeviation(ctx, pending[i].aiReq)
-			if err == nil {
-				mu.Lock()
-				pending[i].explanation = resp.Explanation
-				pending[i].nextStep = resp.NextStep
-				mu.Unlock()
-			}
-			n := int(atomic.AddInt32(&explained, 1))
-			setProgress(ctx, stmt.ID, orgID, ProgressResponse{
-				Phase:           "explaining",
-				WorksTotal:      aiCallCount,
-				WorksChecked:    n,
-				FlagCount:       n,
-				UnmatchedCount:  unmatchedCount,
-				DistributionKey: distributionKey,
-			})
-		}(i)
-	}
-	wg.Wait()
-
-	// ── Pass 3: insert all flags (sequential DB writes) ───────────────────────
-	var flagCount int
-	for _, pf := range pending {
 		if _, insertErr := db.Exec(ctx,
 			`INSERT INTO detection_flags
 			    (org_id, detection_run_id, statement_line_id, work_title, iswc,
 			     expected_amount, received_amount, deviation_amount, deviation_pct,
-			     severity, pattern_type, explanation, next_step, status)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open')`,
-			orgID, runID, pf.lineID, pf.workTitle, pf.iswc,
-			pf.result.Expected, pf.result.Received, pf.result.DeviationAmount, pf.result.DeviationPct,
-			pf.result.Severity, pf.patternType, pf.explanation, pf.nextStep,
+			     severity, pattern_type, explanation, next_step,
+			     explanation_status, right_type, period, gross_amount, controlled_share,
+			     status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'open')`,
+			orgID, runID, line.ID, line.WorkTitle, line.ISWC,
+			result.Expected, result.Received, result.DeviationAmount, result.DeviationPct,
+			result.Severity, patternType, explanation, nextStep,
+			explanationStatus, line.RightType, period, line.GrossAmount, line.ControlledShare,
 		); insertErr != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: "could not save detection flag"}
 		}
@@ -399,7 +317,6 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		ID: stmt.ID, Status: "completed",
 	})
 
-	// Phase: done — all flags written.
 	setProgress(ctx, stmt.ID, orgID, ProgressResponse{
 		Phase:           "done",
 		WorksTotal:      totalLines,
@@ -414,6 +331,91 @@ func RunDetection(ctx context.Context, req *RunDetectionRequest) (*RunDetectionR
 		FlagCount:      flagCount,
 		UnmatchedCount: unmatchedCount,
 	}, nil
+}
+
+// GenerateExplanation calls Claude for a single flag and stores the result.
+// Idempotent: returns the cached explanation when explanation_status='generated'.
+// On AI failure: sets explanation_status='failed' and returns the flag with a
+// fallback message — never returns an HTTP error so the frontend can show a
+// retry button instead of a crash.
+//
+//encore:api private
+func GenerateExplanation(ctx context.Context, req *GenerateExplanationRequest) (*Flag, error) {
+	data := encoreauth.Data().(*authsvc.AuthData)
+	orgID := data.OrgID
+
+	f, err := getFlag(ctx, req.FlagID, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Already done — return cached result.
+	if f.ExplanationStatus == "generated" {
+		return f, nil
+	}
+
+	aiReq := &aisvc.ExplainRequest{
+		WorkTitle:       f.WorkTitle,
+		ISWC:            f.ISWC,
+		RightType:       f.RightType,
+		Period:          f.Period,
+		Severity:        f.Severity,
+		GrossSEK:        f.GrossAmount,
+		ControlledShare: f.ControlledShare,
+		ExpectedSEK:     f.ExpectedAmount,
+		ReceivedSEK:     f.ReceivedAmount,
+		DeviationSEK:    f.DeviationAmount,
+		DeviationPct:    f.DeviationPct,
+	}
+
+	resp, aiErr := aisvc.ExplainDeviation(ctx, aiReq)
+	if aiErr != nil {
+		// AI degraded — set failed status and return flag with a fallback message.
+		db.Exec(ctx,
+			`UPDATE detection_flags SET explanation_status='failed', updated_at=NOW()
+			 WHERE id=$1 AND org_id=$2`,
+			f.ID, orgID,
+		)
+		f.ExplanationStatus = "failed"
+		f.Explanation = "An explanation could not be generated at this time. The deviation data above is accurate — the explanation service is temporarily unavailable."
+		f.NextStep = "You can retry the explanation by clicking the button below. If the issue persists, the deviation data itself is sufficient to begin a dispute."
+		return f, nil
+	}
+
+	db.Exec(ctx,
+		`UPDATE detection_flags
+		 SET explanation=$1, next_step=$2, explanation_status='generated', updated_at=NOW()
+		 WHERE id=$3 AND org_id=$4`,
+		resp.Explanation, resp.NextStep, f.ID, orgID,
+	)
+	f.Explanation = resp.Explanation
+	f.NextStep = resp.NextStep
+	f.ExplanationStatus = "generated"
+	return f, nil
+}
+
+// getFlag is the internal shared fetch used by GetFlag and GenerateExplanation.
+func getFlag(ctx context.Context, id int64, orgID string) (*Flag, error) {
+	var f Flag
+	err := db.QueryRow(ctx,
+		`SELECT id, org_id, detection_run_id, statement_line_id, work_id,
+		        work_title, iswc, expected_amount, received_amount,
+		        deviation_amount, deviation_pct, severity, pattern_type,
+		        explanation, next_step, explanation_status,
+		        right_type, period, gross_amount, controlled_share,
+		        status, created_at
+		 FROM detection_flags WHERE id=$1 AND org_id=$2`,
+		id, orgID,
+	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
+		&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
+		&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
+		&f.Explanation, &f.NextStep, &f.ExplanationStatus,
+		&f.RightType, &f.Period, &f.GrossAmount, &f.ControlledShare,
+		&f.Status, &f.CreatedAt)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "deviation not found"}
+	}
+	return &f, nil
 }
 
 // addUnmatched records a line that could not be evaluated.
@@ -437,7 +439,9 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id, f.work_id,
 	                 f.work_title, f.iswc, f.expected_amount, f.received_amount,
 	                 f.deviation_amount, f.deviation_pct, f.severity, f.pattern_type,
-	                 f.explanation, f.next_step, f.status, f.created_at
+	                 f.explanation, f.next_step, f.explanation_status,
+	                 f.right_type, f.period, f.gross_amount, f.controlled_share,
+	                 f.status, f.created_at
 	          FROM detection_flags f
 	          WHERE f.org_id = $1
 	            AND f.detection_run_id IN (
@@ -477,7 +481,9 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 		rows.Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
 			&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 			&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-			&f.Explanation, &f.NextStep, &f.Status, &f.CreatedAt)
+			&f.Explanation, &f.NextStep, &f.ExplanationStatus,
+			&f.RightType, &f.Period, &f.GrossAmount, &f.ControlledShare,
+			&f.Status, &f.CreatedAt)
 		out = append(out, f)
 	}
 	return &ListFlagsResponse{Flags: out}, nil
@@ -489,23 +495,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
-
-	var f Flag
-	err := db.QueryRow(ctx,
-		`SELECT id, org_id, detection_run_id, statement_line_id, work_id,
-		        work_title, iswc, expected_amount, received_amount,
-		        deviation_amount, deviation_pct, severity, pattern_type,
-		        explanation, next_step, status, created_at
-		 FROM detection_flags WHERE id=$1 AND org_id=$2`,
-		req.ID, orgID,
-	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
-		&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
-		&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
-		&f.Explanation, &f.NextStep, &f.Status, &f.CreatedAt)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "deviation not found"}
-	}
-	return &f, nil
+	return getFlag(ctx, req.ID, orgID)
 }
 
 // GetUnmatched returns lines from the latest detection run for the given
