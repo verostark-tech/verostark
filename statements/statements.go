@@ -240,7 +240,7 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 	r := filessvc.Uploads.Download(ctx, req.FileKey)
 	defer r.Close()
 
-	crdLines, parseErrs := crd.ParseFile(r)
+	crdLines, parsedPeriod, parseErrs := crd.ParseFile(r)
 	for _, e := range parseErrs {
 		// Log parse warnings but do not abort — partial results are still useful.
 		_ = e
@@ -252,12 +252,22 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 		}
 	}
 
+	// Use the period from the request if provided; fall back to the one
+	// extracted from the CRD SDN record.
+	period := req.Period
+	if period == "" {
+		period = parsedPeriod
+	}
+	if period == "" {
+		period = "Unknown"
+	}
+
 	var s Statement
 	if err := db.QueryRow(ctx,
 		`INSERT INTO statements (org_id, filename, period, pro, status)
 		 VALUES ($1, $2, $3, 'STIM', 'pending')
 		 RETURNING id, org_id, filename, period, pro, status, created_at`,
-		orgID, req.Filename, req.Period,
+		orgID, req.Filename, period,
 	).Scan(&s.ID, &s.OrgID, &s.Filename, &s.Period, &s.PRO, &s.Status, &s.CreatedAt); err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: "could not register statement"}
 	}
@@ -283,7 +293,7 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 			"",                     // source: not present in CRD WER record
 			mapRightCategory(l.RightCategory),
 			netSEK, grossSEK, controlledShare,
-			l.Currency, req.Period,
+			l.Currency, period,
 			grossCents, netCents,
 			l.ControlledNumerator, l.ControlledDenominator,
 		)

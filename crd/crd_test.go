@@ -100,14 +100,14 @@ var canonicalFixture = strings.Join([]string{
 // --- Parser tests ---
 
 func TestParseFile_LineCount(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	if len(lines) != 2 {
 		t.Fatalf("got %d WER lines, want 2", len(lines))
 	}
 }
 
 func TestParseFile_WorkRefs(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	if lines[0].WorkRef != "STIM20190442" {
 		t.Errorf("lines[0].WorkRef=%q want STIM20190442", lines[0].WorkRef)
 	}
@@ -117,7 +117,7 @@ func TestParseFile_WorkRefs(t *testing.T) {
 }
 
 func TestParseFile_WorkTitles(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	if lines[0].WorkTitle != "SOMMARNATT" {
 		t.Errorf("lines[0].WorkTitle=%q want SOMMARNATT", lines[0].WorkTitle)
 	}
@@ -128,7 +128,7 @@ func TestParseFile_WorkTitles(t *testing.T) {
 
 func TestParseFile_GrossAmounts(t *testing.T) {
 	// CLAUDE.md: SOMMARNATT gross=372000 (3720.00 SEK), DROMMAR gross=102600 (1026.00 SEK).
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	if lines[0].GrossCents != 372000 {
 		t.Errorf("SOMMARNATT GrossCents=%d want 372000", lines[0].GrossCents)
 	}
@@ -139,7 +139,7 @@ func TestParseFile_GrossAmounts(t *testing.T) {
 
 func TestParseFile_NetAmounts(t *testing.T) {
 	// CLAUDE.md: SOMMARNATT net=124000 (1240.00 SEK), DROMMAR net=102600 (1026.00 SEK).
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	if lines[0].NetCents != 124000 {
 		t.Errorf("SOMMARNATT NetCents=%d want 124000", lines[0].NetCents)
 	}
@@ -149,7 +149,7 @@ func TestParseFile_NetAmounts(t *testing.T) {
 }
 
 func TestParseFile_RightCategory(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	for i, l := range lines {
 		if l.RightCategory != "MEC" {
 			t.Errorf("lines[%d].RightCategory=%q want MEC", i, l.RightCategory)
@@ -158,7 +158,7 @@ func TestParseFile_RightCategory(t *testing.T) {
 }
 
 func TestParseFile_ControlledShares(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	for i, l := range lines {
 		if l.ControlledNumerator != 10000 {
 			t.Errorf("lines[%d].ControlledNumerator=%d want 10000", i, l.ControlledNumerator)
@@ -170,7 +170,7 @@ func TestParseFile_ControlledShares(t *testing.T) {
 }
 
 func TestParseFile_Currency(t *testing.T) {
-	lines, _ := ParseFile(strings.NewReader(canonicalFixture))
+	lines, _, _ := ParseFile(strings.NewReader(canonicalFixture))
 	for i, l := range lines {
 		if l.Currency != "SEK" {
 			t.Errorf("lines[%d].Currency=%q want SEK", i, l.Currency)
@@ -180,7 +180,7 @@ func TestParseFile_Currency(t *testing.T) {
 
 func TestParseFile_WERTooShort(t *testing.T) {
 	fixture := "WER" + strings.Repeat(" ", 50) // only 53 chars — too short
-	lines, errs := ParseFile(strings.NewReader(fixture))
+	lines, _, errs := ParseFile(strings.NewReader(fixture))
 	if len(lines) != 0 {
 		t.Errorf("got %d lines, want 0", len(lines))
 	}
@@ -199,7 +199,7 @@ func TestParseFile_AmountDecimals_Override(t *testing.T) {
 		buildWER("ME", "SEK", 3720, 1240), // raw integers with 0dp → normalised to *100
 	}, "\n")
 
-	lines, _ := ParseFile(strings.NewReader(fixture))
+	lines, _, _ := ParseFile(strings.NewReader(fixture))
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}

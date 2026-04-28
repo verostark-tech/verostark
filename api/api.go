@@ -13,35 +13,56 @@ import (
 	"encore.app/statements"
 )
 
+// CreateStatementAndRunResponse wraps the created statement and the detection
+// run ID so the frontend can start polling progress immediately.
+type CreateStatementAndRunResponse struct {
+	*statements.Statement
+	DetectionRunID *int64 `json:"detection_run_id,omitempty"`
+}
+
 // =============================================================================
 // Statements
 // =============================================================================
 
 type CreateStatementRequest struct {
 	Filename string `json:"filename"`
-	Period   string `json:"period"`
+	Period   string `json:"period,omitempty"` // optional — auto-extracted from the CRD SDN record
 	FileKey  string `json:"file_key"`
 }
 
-// CreateStatement registers an uploaded STIM statement file and parses its lines.
-// Call /files/upload first to obtain the file_key, filename, and store the file.
+// CreateStatement registers an uploaded STIM statement file, parses its lines,
+// and immediately kicks off deviation detection in the background.
+// Period is optional — it is read from the CRD file's SDN record automatically.
+// Returns the statement plus a detection_run_id so the frontend can start
+// polling /api/statements/:id/detection-progress right away.
 //
 //encore:api auth method=POST path=/api/statements
-func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*statements.Statement, error) {
+func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*CreateStatementAndRunResponse, error) {
 	if req.Filename == "" {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "filename is required"}
-	}
-	if req.Period == "" {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "period is required (e.g. \"2024-Q1\")"}
 	}
 	if req.FileKey == "" {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_key is required — upload the file first via /files/upload"}
 	}
-	return statements.CreateStatement(ctx, &statements.CreateStatementRequest{
+	stmt, err := statements.CreateStatement(ctx, &statements.CreateStatementRequest{
 		Filename: req.Filename,
 		Period:   req.Period,
 		FileKey:  req.FileKey,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Fire detection in the background immediately — no user action required.
+	// context.WithoutCancel preserves auth data but detaches from the HTTP
+	// request lifetime so detection keeps running after we return.
+	go func() {
+		detectionsvc.RunDetection(context.WithoutCancel(ctx), &detectionsvc.RunDetectionRequest{
+			StatementID: stmt.ID,
+		})
+	}()
+
+	return &CreateStatementAndRunResponse{Statement: stmt}, nil
 }
 
 // ListStatements returns all royalty statements for the organisation, newest first.

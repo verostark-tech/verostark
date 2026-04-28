@@ -51,14 +51,19 @@ type Line struct {
 // accumulated parent context. SDN, MWN, MDR, and MIP state carries forward
 // until replaced by a new record of the same type.
 //
+// The second return value is the distribution period formatted as "YYYY-QN"
+// (e.g. "2025-Q1"), derived from the SDN period_start field. Empty string if
+// no SDN record is present.
+//
 // Parse errors on individual records are collected without halting — parsing
 // always continues to the end of file. Call sites should log the returned errors.
-func ParseFile(r io.Reader) ([]Line, []error) {
+func ParseFile(r io.Reader) ([]Line, string, []error) {
 	var (
 		out  []Line
 		errs []error
 
 		amountDecimals = 2 // overridden by SDN amount_decimals field
+		period         string
 		workRef        string
 		workTitle      string
 		iswc           string
@@ -81,6 +86,9 @@ func ParseFile(r io.Reader) ([]Line, []error) {
 		case "SDN":
 			if d, err := parseSDNDecimals(raw); err == nil {
 				amountDecimals = d
+			}
+			if p := parseSDNPeriod(raw); p != "" && period == "" {
+				period = p // use the first SDN period seen
 			}
 		case "MWN":
 			workRef = field(raw, 20, 14)
@@ -116,7 +124,23 @@ func ParseFile(r io.Reader) ([]Line, []error) {
 	if err := scanner.Err(); err != nil {
 		errs = append(errs, fmt.Errorf("scanner: %w", err))
 	}
-	return out, errs
+	return out, period, errs
+}
+
+// parseSDNPeriod reads period_start (pos 33, size 8, YYYYMMDD) from an SDN
+// record and returns it formatted as "YYYY-QN". Returns "" if absent or invalid.
+func parseSDNPeriod(line string) string {
+	s := field(line, 33, 8)
+	if len(s) < 6 {
+		return ""
+	}
+	year := s[:4]
+	month, err := strconv.Atoi(s[4:6])
+	if err != nil || month < 1 || month > 12 {
+		return ""
+	}
+	q := (month-1)/3 + 1
+	return fmt.Sprintf("%s-Q%d", year, q)
 }
 
 // parseSDNDecimals reads the amount_decimals field from an SDN record.
