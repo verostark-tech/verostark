@@ -40,7 +40,6 @@ type Flag struct {
 	OrgID             string    `json:"org_id"`
 	DetectionRunID    int64     `json:"detection_run_id"`
 	StatementLineID   *int64    `json:"statement_line_id,omitempty"`
-	WorkID            *int64    `json:"work_id,omitempty"`
 	WorkTitle         string    `json:"work_title"`
 	ISWC              string    `json:"iswc"`
 	ExpectedAmount    float64   `json:"expected_amount"`
@@ -410,7 +409,7 @@ func GenerateExplanation(ctx context.Context, req *GenerateExplanationRequest) (
 func getFlag(ctx context.Context, id int64, orgID string) (*Flag, error) {
 	var f Flag
 	err := db.QueryRow(ctx,
-		`SELECT id, org_id, detection_run_id, statement_line_id, work_id,
+		`SELECT id, org_id, detection_run_id, statement_line_id,
 		        work_title, iswc, expected_amount, received_amount,
 		        deviation_amount, deviation_pct, severity, pattern_type,
 		        explanation, next_step, explanation_status,
@@ -418,7 +417,7 @@ func getFlag(ctx context.Context, id int64, orgID string) (*Flag, error) {
 		        status, created_at
 		 FROM detection_flags WHERE id=$1 AND org_id=$2`,
 		id, orgID,
-	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
+	).Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID,
 		&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 		&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
 		&f.Explanation, &f.NextStep, &f.ExplanationStatus,
@@ -448,7 +447,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
-	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id, f.work_id,
+	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id,
 	                 f.work_title, f.iswc, f.expected_amount, f.received_amount,
 	                 f.deviation_amount, f.deviation_pct, f.severity, f.pattern_type,
 	                 f.explanation, f.next_step, f.explanation_status,
@@ -490,7 +489,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	var out []Flag
 	for rows.Next() {
 		var f Flag
-		rows.Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID, &f.WorkID,
+		rows.Scan(&f.ID, &f.OrgID, &f.DetectionRunID, &f.StatementLineID,
 			&f.WorkTitle, &f.ISWC, &f.ExpectedAmount, &f.ReceivedAmount,
 			&f.DeviationAmount, &f.DeviationPct, &f.Severity, &f.PatternType,
 			&f.Explanation, &f.NextStep, &f.ExplanationStatus,

@@ -13,9 +13,7 @@ import (
 
 	authsvc "encore.app/auth"
 	"encore.app/crd"
-	"encore.app/cwr"
 	filessvc "encore.app/files"
-	"encore.app/validators"
 )
 
 var db = sqldb.NewDatabase("statements", sqldb.DatabaseConfig{
@@ -67,33 +65,7 @@ type StatementLine struct {
 	ControlledDenominator int64 `json:"controlled_denominator"`
 }
 
-// Work is a registered catalogue work (imported from CWR).
-type Work struct {
-	ID          int64     `json:"id"`
-	OrgID       string    `json:"org_id"`
-	Title       string    `json:"title"`
-	ISWC        string    `json:"iswc"`
-	InternalRef string    `json:"internal_ref"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-// WorkMatch is the result of matching a statement line to a catalogue work.
-type WorkMatch struct {
-	WorkID          int64   `json:"work_id"`
-	Title           string  `json:"title"`
-	ControlledShare float64 `json:"controlled_share"`
-}
-
 // --- Request / response types ---
-
-type ProcessCWRRequest struct {
-	FileKey string `json:"file_key"`
-}
-
-type ProcessCWRResponse struct {
-	WorksStored   int `json:"works_stored"`
-	WritersStored int `json:"writers_stored"`
-}
 
 type CreateStatementRequest struct {
 	Filename string `json:"filename"`
@@ -117,113 +89,12 @@ type ListStatementLinesResponse struct {
 	Lines []StatementLine `json:"lines"`
 }
 
-type GetWorkForLineRequest struct {
-	ISWC string `json:"iswc"`
-}
-
 type UpdateStatementStatusRequest struct {
 	ID     int64  `json:"id"`
 	Status string `json:"status"`
 }
 
-type ListWorksResponse struct {
-	Works []Work `json:"works"`
-}
-
 // --- Private API ---
-
-// ProcessCWR downloads a previously uploaded CWR file, parses it, and stores
-// all works and writers into the catalogue.
-//
-//encore:api private
-func ProcessCWR(ctx context.Context, req *ProcessCWRRequest) (*ProcessCWRResponse, error) {
-	data := encoreauth.Data().(*authsvc.AuthData)
-	orgID := data.OrgID
-
-	r := filessvc.Uploads.Download(ctx, req.FileKey)
-	defer r.Close()
-
-	records, _ := cwr.ParseFile(r)
-	if len(records) == 0 {
-		return nil, &errs.Error{
-			Code:    errs.InvalidArgument,
-			Message: "no works found in the file — check that it is a valid CWR file",
-		}
-	}
-
-	return storeWorks(ctx, orgID, records)
-}
-
-// storeWorks persists parsed CWR records.
-func storeWorks(ctx context.Context, orgID string, records []cwr.WorkRecord) (*ProcessCWRResponse, error) {
-	var worksStored, writersStored int
-
-	for _, rec := range records {
-		iswc := ""
-		if rec.Work.ISWC != "" {
-			iswc = validators.NormaliseISWC(rec.Work.ISWC)
-		}
-
-		var workID int64
-		if iswc != "" {
-			db.QueryRow(ctx,
-				`SELECT id FROM works WHERE org_id=$1 AND iswc=$2`,
-				orgID, iswc,
-			).Scan(&workID)
-		}
-		if workID == 0 {
-			if err := db.QueryRow(ctx,
-				`INSERT INTO works (org_id, title, iswc, internal_ref)
-				 VALUES ($1, $2, $3, $4) RETURNING id`,
-				orgID, rec.Work.Title, iswc, rec.Work.SubmitterRef,
-			).Scan(&workID); err != nil {
-				continue
-			}
-			worksStored++
-		}
-
-		for _, w := range rec.Writers {
-			ipiName := validators.NormaliseIPIName(w.IPIName)
-
-			var writerID int64
-			db.QueryRow(ctx,
-				`SELECT id FROM writers WHERE org_id=$1 AND ipi_name_number=$2`,
-				orgID, ipiName,
-			).Scan(&writerID)
-
-			if writerID == 0 {
-				if err := db.QueryRow(ctx,
-					`INSERT INTO writers (org_id, name, ipi_name_number, ipi_base_number, is_controlled)
-					 VALUES ($1, $2, $3, $4, true) RETURNING id`,
-					orgID,
-					w.LastName+" "+w.FirstName,
-					ipiName,
-					validators.NormaliseIPIBase(w.IPIBase),
-				).Scan(&writerID); err != nil {
-					continue
-				}
-				writersStored++
-			}
-
-			var linkExists bool
-			db.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM work_writers WHERE org_id=$1 AND work_id=$2 AND writer_id=$3)`,
-				orgID, workID, writerID,
-			).Scan(&linkExists)
-			if linkExists {
-				continue
-			}
-
-			db.Exec(ctx,
-				`INSERT INTO work_writers (org_id, work_id, writer_id, manuscript_share, controlled_share)
-				 VALUES ($1, $2, $3, $4, $4)`,
-				orgID, workID, writerID, w.ManuscriptShare,
-			)
-		}
-	}
-
-	return &ProcessCWRResponse{WorksStored: worksStored, WritersStored: writersStored}, nil
-}
 
 // CreateStatement registers a new statement upload record and parses its CRD lines.
 // FileKey must be the storage key returned by /files/upload for a .crd file.
@@ -290,7 +161,7 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			orgID, s.ID,
 			l.WorkRef, l.WorkTitle, l.ISWC,
-			"",                     // source: not present in CRD WER record
+			"",
 			mapRightCategory(l.RightCategory),
 			netSEK, grossSEK, controlledShare,
 			l.Currency, period,
@@ -303,7 +174,6 @@ func CreateStatement(ctx context.Context, req *CreateStatementRequest) (*Stateme
 }
 
 // mapRightCategory maps a CRD right_category code to the canonical right_type string.
-// "MEC" → "mechanical", "PER" → "performance", anything else passed through lowercased.
 func mapRightCategory(rc string) string {
 	switch rc {
 	case "MEC":
@@ -397,57 +267,6 @@ func ListStatementLines(ctx context.Context, req *ListStatementLinesRequest) (*L
 		out = append(out, l)
 	}
 	return &ListStatementLinesResponse{Lines: out}, nil
-}
-
-// GetWorkForLine matches a statement line's ISWC to a catalogue work.
-//
-//encore:api private
-func GetWorkForLine(ctx context.Context, req *GetWorkForLineRequest) (*WorkMatch, error) {
-	data := encoreauth.Data().(*authsvc.AuthData)
-	orgID := data.OrgID
-
-	iswc := validators.NormaliseISWC(req.ISWC)
-
-	var m WorkMatch
-	err := db.QueryRow(ctx,
-		`SELECT w.id, w.title, COALESCE(SUM(ww.controlled_share), 0)
-		 FROM works w
-		 LEFT JOIN work_writers ww ON ww.work_id = w.id AND ww.org_id = $1
-		 WHERE w.org_id = $1 AND w.iswc = $2
-		 GROUP BY w.id, w.title`,
-		orgID, iswc,
-	).Scan(&m.WorkID, &m.Title, &m.ControlledShare)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "work not found in catalogue"}
-	}
-	return &m, nil
-}
-
-// ListWorks returns all catalogue works for the org.
-//
-//encore:api private
-func ListWorks(ctx context.Context) (*ListWorksResponse, error) {
-	data := encoreauth.Data().(*authsvc.AuthData)
-	orgID := data.OrgID
-
-	rows, err := db.Query(ctx,
-		`SELECT id, org_id, title, iswc, internal_ref, created_at
-		 FROM works WHERE org_id=$1
-		 ORDER BY title`,
-		orgID,
-	)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: "could not load works"}
-	}
-	defer rows.Close()
-
-	var out []Work
-	for rows.Next() {
-		var w Work
-		rows.Scan(&w.ID, &w.OrgID, &w.Title, &w.ISWC, &w.InternalRef, &w.CreatedAt)
-		out = append(out, w)
-	}
-	return &ListWorksResponse{Works: out}, nil
 }
 
 // Reset deletes all statements and lines for the caller's org.
