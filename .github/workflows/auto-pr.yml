@@ -1,0 +1,46 @@
+name: Open production PR
+
+# Fires after the Test workflow completes successfully on main.
+# Creates a PR from main → production if one does not already exist.
+# Someone still has to review and merge — this just removes the manual memory requirement.
+
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  open-pr:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create production PR if not exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING=$(gh pr list --base production --head main --state open --json number --jq length)
+          if [ "$EXISTING" -eq "0" ]; then
+            gh pr create \
+              --base production \
+              --head main \
+              --title "Deploy to production" \
+              --body "$(cat <<'EOF'
+Tests passed on \`main\`. Review the diff and merge to deploy to production.
+
+**Checklist before merging:**
+- [ ] Tested on staging
+- [ ] No breaking API changes
+- [ ] Migrations are backwards-compatible
+EOF
+)"
+          else
+            echo "Production PR already open — skipping."
+          fi
