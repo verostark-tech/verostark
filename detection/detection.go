@@ -368,9 +368,21 @@ func GenerateExplanation(ctx context.Context, req *GenerateExplanationRequest) (
 		DeviationPct:    f.DeviationPct,
 	}
 
-	resp, aiErr := aisvc.ExplainDeviation(ctx, aiReq)
+	// Cap the Claude call at 7 seconds. A timeout leaves status='pending' so
+	// the frontend can retry; a hard error sets status='failed'.
+	aiCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+	defer cancel()
+
+	resp, aiErr := aisvc.ExplainDeviation(aiCtx, aiReq)
 	if aiErr != nil {
-		// AI degraded — set failed status and return flag with a fallback message.
+		if aiCtx.Err() == context.DeadlineExceeded {
+			// Timeout — generation is still possible, tell the user to check back.
+			f.Explanation = "Explanation is being generated. Check back in a moment."
+			f.NextStep = ""
+			// status stays 'pending' — no DB write needed.
+			return f, nil
+		}
+		// Hard AI failure — mark as failed so the frontend shows a retry button.
 		db.Exec(ctx,
 			`UPDATE detection_flags SET explanation_status='failed', updated_at=NOW()
 			 WHERE id=$1 AND org_id=$2`,
