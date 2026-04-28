@@ -1,0 +1,24 @@
+SDN                             2025010120250331                                                                2      SEK
+MWN                STIM20250001  ÅSKAN ÖVER FJÄLLEN                                                                                                   T2000000010
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000300000                                                                                   000000000000100000
+MWN                STIM20250002  EMPTY FIELDS TEST                                                                                                       T2000000020
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000300000                                                                                   000000000000100000
+ADJ                                                                                                 
+MWN                STIM20250003  RECOVERY AFTER ADJ                                                                                                      T2000000030
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000102600                                                                                   000000000000102600
+FEO                                                                                                 
+MWN                STIM20250004  RECOVERY AFTER FEO                                                                                                      T2000000040
+MDR                MDMEC
+MIP                                1000010000
+WER                               ME                                                                                                                                                                                                                 SEK000000000000300000                                                                                   000000000000100000
+MWN                STIM20250005  ICC INSIDE BLOCK                                                                                                        T2000000050
+MDR                MDMEC
+MIP                                1000010000
+ICC                                                                                                 
+WER                               ME                                                                                                                                                                                                                 SEK000000000000102600                                                                                   000000000000102600

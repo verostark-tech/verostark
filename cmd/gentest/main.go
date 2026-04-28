@@ -330,6 +330,98 @@ var grossPool = []int64{
 	4500000, 5500000, 7000000, 9000000, 11000000, 15000000, 22000000,
 }
 
+// ── Edge cases file ───────────────────────────────────────────────────────────
+
+// sdnLineWithPeriod builds an SDN record that includes period_start and
+// period_end so the auto-period extraction can be tested.
+// period_start: pos 33 size 8  period_end: pos 41 size 8
+func sdnLineWithPeriod(start, end string) string {
+	b := blank(122)
+	copy(b[0:3], "SDN")
+	setR(b, 33, 8, start)
+	setR(b, 41, 8, end)
+	b[112] = '2'
+	copy(b[119:122], "SEK")
+	return string(b)
+}
+
+// rawRecord produces a minimal record of the given 3-char type padded to 100
+// chars. Used for ADJ, FEO, ICC records that must be silently skipped.
+func rawRecord(recType string) string {
+	b := blank(100)
+	copy(b[0:3], recType)
+	return string(b)
+}
+
+// writeEdgeCases generates verostark_edge_cases.crd.
+// Five works, each targeting one parser edge case:
+//
+//	Work 1 – Swedish characters (å, ö, ä)         → CLEAN
+//	Work 2 – Space-padded optional WER fields      → CLEAN
+//	ADJ    – Adjustment record between MWN blocks  → SKIPPED
+//	Work 3 – First work after ADJ                  → CRITICAL
+//	FEO    – Fees-in-Error record between blocks   → SKIPPED
+//	Work 4 – First work after FEO                  → CLEAN
+//	Work 5 – ICC record inside MWN block           → CRITICAL (ICC ignored)
+func writeEdgeCases() {
+	var sb strings.Builder
+
+	sb.WriteString(sdnLineWithPeriod("20250101", "20250331") + "\n")
+
+	// ── Work 1: Swedish characters, CLEAN ─────────────────────────────────────
+	// Å = U+00C5, Ö = U+00D6, Ä = U+00C4 — all 2-byte UTF-8.
+	// gross=300000 cents (3000.00 SEK)  net=100000 cents (1000.00 SEK)
+	// ratio = 100000/300000 = 1/3 = expected → CLEAN
+	sb.WriteString(mwnLine("STIM20250001", "ÅSKAN ÖVER FJÄLLEN", "T2000000010") + "\n")
+	sb.WriteString(mdrLine() + "\n")
+	sb.WriteString(mipLine(10000, 10000) + "\n")
+	sb.WriteString(werLine(300000, 100000) + "\n")
+
+	// ── Work 2: Space-padded optional WER fields, CLEAN ───────────────────────
+	// werLine() already fills every non-required field with spaces.
+	// This asserts the parser handles space-only optional fields without error.
+	sb.WriteString(mwnLine("STIM20250002", "EMPTY FIELDS TEST", "T2000000020") + "\n")
+	sb.WriteString(mdrLine() + "\n")
+	sb.WriteString(mipLine(10000, 10000) + "\n")
+	sb.WriteString(werLine(300000, 100000) + "\n")
+
+	// ── ADJ: silently skipped ──────────────────────────────────────────────────
+	sb.WriteString(rawRecord("ADJ") + "\n")
+
+	// ── Work 3: After ADJ, CRITICAL ───────────────────────────────────────────
+	// gross=102600 (1026.00 SEK)  net=102600 (1026.00 SEK)
+	// ratio = 1/1, expected = 1/3 → ratio_excess = 3.0 → CRITICAL
+	sb.WriteString(mwnLine("STIM20250003", "RECOVERY AFTER ADJ", "T2000000030") + "\n")
+	sb.WriteString(mdrLine() + "\n")
+	sb.WriteString(mipLine(10000, 10000) + "\n")
+	sb.WriteString(werLine(102600, 102600) + "\n")
+
+	// ── FEO: silently skipped ──────────────────────────────────────────────────
+	sb.WriteString(rawRecord("FEO") + "\n")
+
+	// ── Work 4: After FEO, CLEAN ──────────────────────────────────────────────
+	sb.WriteString(mwnLine("STIM20250004", "RECOVERY AFTER FEO", "T2000000040") + "\n")
+	sb.WriteString(mdrLine() + "\n")
+	sb.WriteString(mipLine(10000, 10000) + "\n")
+	sb.WriteString(werLine(300000, 100000) + "\n")
+
+	// ── Work 5: ICC inside MWN block, CRITICAL ────────────────────────────────
+	// ICC appears between MIP and WER — detection must ignore it and use WER only.
+	sb.WriteString(mwnLine("STIM20250005", "ICC INSIDE BLOCK", "T2000000050") + "\n")
+	sb.WriteString(mdrLine() + "\n")
+	sb.WriteString(mipLine(10000, 10000) + "\n")
+	sb.WriteString(rawRecord("ICC") + "\n") // must be silently ignored
+	sb.WriteString(werLine(102600, 102600) + "\n")
+
+	path := "testdata/verostark_edge_cases.crd"
+	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "write %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%-52s    5 works    5 WER lines\n", path)
+	fmt.Printf("  CLEAN:2  CRITICAL:2  SKIPPED:3(ADJ+FEO+ICC)\n\n")
+}
+
 // ── File writer ───────────────────────────────────────────────────────────────
 
 func writeFile(cfg fileConfig) {
@@ -413,4 +505,5 @@ func main() {
 		fmt.Printf("  CLEAN:%-3d  POSSIBLE:%-3d  MEDIUM:%-3d  HIGH:%-3d  CRITICAL:%-3d  UNDERPAY:%-3d\n\n",
 			cfg.clean, cfg.possible, cfg.medium, cfg.high, cfg.critical, cfg.underpay)
 	}
+	writeEdgeCases()
 }
