@@ -498,6 +498,20 @@ func GetFlag(ctx context.Context, req *GetFlagRequest) (*Flag, error) {
 	return getFlag(ctx, req.ID, orgID)
 }
 
+// Reset deletes all detection data for the caller's org.
+// Private — only callable from the api service, which guards against production.
+//
+//encore:api private
+func Reset(ctx context.Context) error {
+	data := encoreauth.Data().(*authsvc.AuthData)
+	orgID := data.OrgID
+	db.Exec(ctx, `DELETE FROM detection_flags WHERE org_id=$1`, orgID)
+	db.Exec(ctx, `DELETE FROM detection_unmatched WHERE org_id=$1`, orgID)
+	db.Exec(ctx, `DELETE FROM detection_progress WHERE org_id=$1`, orgID)
+	db.Exec(ctx, `DELETE FROM detection_runs WHERE org_id=$1`, orgID)
+	return nil
+}
+
 // GetUnmatched returns lines from the latest detection run for the given
 // statement that could not be evaluated.
 //

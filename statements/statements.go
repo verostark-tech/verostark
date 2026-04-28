@@ -440,6 +440,18 @@ func ListWorks(ctx context.Context) (*ListWorksResponse, error) {
 	return &ListWorksResponse{Works: out}, nil
 }
 
+// Reset deletes all statements and lines for the caller's org.
+// Private — only callable from the api service, which guards against production.
+//
+//encore:api private
+func Reset(ctx context.Context) error {
+	data := encoreauth.Data().(*authsvc.AuthData)
+	orgID := data.OrgID
+	db.Exec(ctx, `DELETE FROM statement_lines WHERE org_id=$1`, orgID)
+	db.Exec(ctx, `DELETE FROM statements WHERE org_id=$1`, orgID)
+	return nil
+}
+
 // UpdateStatementStatus sets the processing status on a statement.
 //
 //encore:api private

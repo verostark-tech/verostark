@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 
+	"encore.dev"
 	"encore.dev/beta/errs"
 
 	detectionsvc "encore.app/detection"
@@ -100,6 +101,24 @@ func GetUnmatched(ctx context.Context, id int64) (*detectionsvc.GetUnmatchedResp
 //encore:api auth method=GET path=/api/statements/:id/detection-progress
 func GetDetectionProgress(ctx context.Context, id int64) (*detectionsvc.ProgressResponse, error) {
 	return detectionsvc.GetProgress(ctx, &detectionsvc.GetProgressRequest{StatementID: id})
+}
+
+// =============================================================================
+// Admin
+// =============================================================================
+
+// AdminReset deletes all statements, lines, and deviation flags for the
+// caller's organisation. Blocked in production — returns 403 if called there.
+// Use this to get a blank canvas in staging or development.
+//
+//encore:api auth method=POST path=/api/admin/reset
+func AdminReset(ctx context.Context) error {
+	if encore.Meta().Environment.Type == encore.EnvProduction {
+		return &errs.Error{Code: errs.PermissionDenied, Message: "reset is not available in production"}
+	}
+	statements.Reset(ctx)
+	detectionsvc.Reset(ctx)
+	return nil
 }
 
 // GenerateExplanation generates the AI explanation and next step for a single
