@@ -25,6 +25,13 @@ jobs:
       - name: Create production PR if not exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: |
+            Tests passed on `main`. Review the diff and merge to deploy to production.
+
+            **Checklist before merging:**
+            - [ ] Tested on staging
+            - [ ] No breaking API changes
+            - [ ] Migrations are backwards-compatible
         run: |
           EXISTING=$(gh pr list --base production --head main --state open --json number --jq length)
           if [ "$EXISTING" -eq "0" ]; then
@@ -32,15 +39,7 @@ jobs:
               --base production \
               --head main \
               --title "Deploy to production" \
-              --body "$(cat <<'EOF'
-Tests passed on \`main\`. Review the diff and merge to deploy to production.
-
-**Checklist before merging:**
-- [ ] Tested on staging
-- [ ] No breaking API changes
-- [ ] Migrations are backwards-compatible
-EOF
-)"
+              --body "$PR_BODY"
           else
             echo "Production PR already open — skipping."
           fi
