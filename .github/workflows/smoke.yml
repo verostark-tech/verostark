@@ -1,0 +1,42 @@
+name: Smoke test staging
+
+# Runs automatically 3 minutes after a push to main lands
+# (enough time for Encore to finish deploying).
+# Also triggerable manually from the Actions tab.
+
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Encore to deploy
+        run: sleep 180
+
+      - name: API responds (expect 401 — auth is working)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://staging-verostark-36n2.encr.app/api/statements)
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" -ne 401 ] && [ "$STATUS" -ne 200 ]; then
+            echo "FAIL: staging API returned $STATUS (want 401 or 200)"
+            exit 1
+          fi
+          echo "OK: staging API is up"
+
+      - name: Deviations endpoint responds
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://staging-verostark-36n2.encr.app/api/deviations)
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" -ne 401 ] && [ "$STATUS" -ne 200 ]; then
+            echo "FAIL: deviations endpoint returned $STATUS"
+            exit 1
+          fi
+          echo "OK: deviations endpoint is up"
