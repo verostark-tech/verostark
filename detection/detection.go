@@ -447,17 +447,23 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	data := encoreauth.Data().(*authsvc.AuthData)
 	orgID := data.OrgID
 
-	query := `SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id,
+	// Use a CTE to materialise the latest run ID per statement once,
+	// then JOIN — avoids the planner re-evaluating a GROUP BY subquery per row.
+	query := `WITH latest_runs AS (
+	              SELECT MAX(id) AS run_id
+	              FROM detection_runs
+	              WHERE org_id = $1
+	              GROUP BY statement_id
+	          )
+	          SELECT f.id, f.org_id, f.detection_run_id, f.statement_line_id,
 	                 f.work_title, f.iswc, f.expected_amount, f.received_amount,
 	                 f.deviation_amount, f.deviation_pct, f.severity, f.pattern_type,
 	                 f.explanation, f.next_step, f.explanation_status,
 	                 f.right_type, f.period, f.gross_amount, f.controlled_share,
 	                 f.status, f.created_at
 	          FROM detection_flags f
-	          WHERE f.org_id = $1
-	            AND f.detection_run_id IN (
-	                SELECT MAX(id) FROM detection_runs WHERE org_id = $1 GROUP BY statement_id
-	            )`
+	          JOIN latest_runs lr ON lr.run_id = f.detection_run_id
+	          WHERE f.org_id = $1`
 	args := []interface{}{orgID}
 	n := 2
 
@@ -473,7 +479,7 @@ func ListFlags(ctx context.Context, req *ListFlagsRequest) (*ListFlagsResponse, 
 	}
 	if req.StatementID != 0 {
 		query += fmt.Sprintf(
-			" AND f.detection_run_id IN (SELECT id FROM detection_runs WHERE statement_id=$%d AND org_id=$1)",
+			" AND f.detection_run_id = (SELECT MAX(id) FROM detection_runs WHERE statement_id=$%d AND org_id=$1)",
 			n,
 		)
 		args = append(args, req.StatementID)
